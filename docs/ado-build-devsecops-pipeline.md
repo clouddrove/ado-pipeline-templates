@@ -1,9 +1,33 @@
-## DevSecOps Pipeline Template
-#### [Template reference](../templates/ado-build-devsecops-pipeline.yaml)
+<h2 align="center">🛡️ DevSecOps Pipeline Template</h2>
+
+<p align="center">
+<a href="../templates/ado-build-devsecops-pipeline.yaml"><strong>📄 Template reference</strong></a>
+</p>
 
 A single Azure Pipelines step template covering secret scanning, SAST, dependency/SCA scanning, unit tests with coverage, Docker build/scan/push, IaC misconfiguration scanning, and multi-environment Helm chart validation. Every concern is gated behind its own boolean parameter, so a consumer pipeline enables exactly what it needs without wiring in separate templates per check.
 
-### Requirements
+---
+
+### Table of Contents
+
+**Getting Started**
+- [📋 Requirements](#-requirements)
+- [🚀 Usage](#-usage)
+
+**Reference**
+- [🔧 Parameters](#-parameters)
+  - [🔘 Toggles](#-toggles)
+  - [🔎 Scan configuration](#-scan-configuration)
+  - [🧪 Test coverage](#-test-coverage)
+  - [🐳 Docker build/push](#-docker-buildpush)
+  - [🚢 Helm validation](#-helm-validation)
+- [📤 Outputs](#-outputs)
+
+---
+
+## Getting Started
+
+### 📋 Requirements
 
 | Requirement | Needed for | Notes |
 |---|---|---|
@@ -14,9 +38,9 @@ A single Azure Pipelines step template covering secret scanning, SAST, dependenc
 | A Node.js app directory with `npm run test:coverage` producing `test-results.xml` (JUnit) and `coverage/cobertura-coverage.xml` | `testCoverage` | See the sample app in [`clouddrove-sandbox/az-template`](https://dev.azure.com/clouddrove-sandbox/az-template) for a reference implementation |
 | Helm override values (`values.yaml` + `values-<env>.yaml` per environment) | `helmValidate` | The template pulls the chart itself from `chartRepoUrl`; it doesn't ship one |
 
-### Usage
+### 🚀 Usage
 
-Minimal - everything enabled with defaults:
+**✅ Minimal** - everything enabled with defaults:
 
 ```yaml
 resources:
@@ -34,7 +58,7 @@ steps:
   - template: templates/ado-build-devsecops-pipeline.yaml@templates
 ```
 
-Selective - only run a subset of checks, with a couple of paths overridden:
+**🎯 Selective** - only run a subset of checks, with a couple of paths overridden:
 
 ```yaml
 steps:
@@ -52,22 +76,26 @@ steps:
       appDir: '$(Build.SourcesDirectory)/src'
 ```
 
-### Parameters
+---
 
-#### Toggles
+## Reference
+
+### 🔧 Parameters
+
+#### 🔘 Toggles
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `secretsScan` | boolean | `true` | Trivy secret scan over `scanPath` |
-| `sastScan` | boolean | `true` | Semgrep SAST scan over `scanPath` |
-| `dependencyScan` | boolean | `true` | Trivy dependency/SCA scan over `scanPath` |
-| `testCoverage` | boolean | `true` | Node.js unit tests + coverage in `appDir` |
-| `dockerBuildPush` | boolean | `true` | Docker build then push via `containerRegistryServiceConnection` |
-| `imageScan` | boolean | `true` | Trivy image scan; only runs when `dockerBuildPush` is also `true` |
-| `iacScan` | boolean | `true` | Trivy config/misconfig scan over `iacScanPath` |
-| `helmValidate` | boolean | `true` | Pull, lint, render, and scan the Helm chart per entry in `helmEnvironments` |
+| `secretsScan` | boolean | `true` | 🔑 Trivy secret scan over `scanPath` |
+| `sastScan` | boolean | `true` | 🕵️ Semgrep SAST scan over `scanPath` |
+| `dependencyScan` | boolean | `true` | 📦 Trivy dependency/SCA scan over `scanPath` |
+| `testCoverage` | boolean | `true` | 🧪 Node.js unit tests + coverage in `appDir` |
+| `dockerBuildPush` | boolean | `true` | 🐳 Docker build then push via `containerRegistryServiceConnection` |
+| `imageScan` | boolean | `true` | 🔍 Trivy image scan; only runs when `dockerBuildPush` is also `true` |
+| `iacScan` | boolean | `true` | 🏗️ Trivy config/misconfig scan over `iacScanPath` |
+| `helmValidate` | boolean | `true` | 🚢 Pull, lint, render, and scan the Helm chart per entry in `helmEnvironments` |
 
-#### Scan configuration
+#### 🔎 Scan configuration
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -78,14 +106,14 @@ steps:
 | `sastSeverity` | string | `ERROR` | Semgrep severity threshold that fails the build |
 | `iacScanPath` | string | `$(Build.SourcesDirectory)/Dockerfile` | Path scanned by `iacScan` |
 
-#### Test coverage
+#### 🧪 Test coverage
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `appDir` | string | `$(Build.SourcesDirectory)/app` | Working directory for `npm ci` / `npm run test:coverage` |
 | `nodeVersion` | string | `20.x` | Node.js version installed via `UseNode@1` |
 
-#### Docker build/push
+#### 🐳 Docker build/push
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -95,7 +123,7 @@ steps:
 | `buildContext` | string | `$(Build.SourcesDirectory)` | Docker build context |
 | `imageTag` | string | `$(Build.SourceVersion)` | Tag applied to the built image |
 
-#### Helm validation
+#### 🚢 Helm validation
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -106,8 +134,8 @@ steps:
 | `chartName` | string | `helmchart` | Chart name within the repo |
 | `chartVersion` | string | `1.4.0` | Chart version to pull |
 
-### Outputs
+### 📤 Outputs
 
-- All scan steps publish JUnit results to `$(Common.TestResultsDirectory)`, consolidated into a single **Security Scans** test run via `PublishTestResults@2` at the end of the template.
-- `testCoverage` additionally publishes a **Unit Tests** run and a Cobertura code coverage summary.
-- Nothing in this template deploys or pushes a Helm chart - `helmValidate` only lints/renders/scans; wiring an actual `helm upgrade --install` is left to the consumer's release process.
+- 🧾 All scan steps publish JUnit results to `$(Common.TestResultsDirectory)`, consolidated into a single **Security Scans** test run via `PublishTestResults@2` at the end of the template.
+- 📊 `testCoverage` additionally publishes a **Unit Tests** run and a Cobertura code coverage summary.
+- 🚫 Nothing in this template deploys or pushes a Helm chart - `helmValidate` only lints/renders/scans; wiring an actual `helm upgrade --install` is left to the consumer's release process.

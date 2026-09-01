@@ -9,30 +9,30 @@ Reusable Azure DevOps YAML pipeline templates, hosted on GitHub - built to reduc
 ### Table of Contents
 
 **About**
-- [📖 Overview](#overview)
-- [✨ Key Features](#key-features)
-- [🤔 Why Use This Repository?](#why-use-this-repository)
+- [📖 Overview](#-overview)
+- [✨ Key Features](#-key-features)
+- [🤔 Why Use This Repository?](#-why-use-this-repository)
 
 **Usage**
-- [📦 Available Templates](#available-templates)
-- [✅ Requirements](#requirements)
-- [🧭 How to Use Templates from GitHub](#how-to-use-templates-from-github)
-- [🔐 Authentication / Service Connection](#authentication--service-connection)
-- [⚙️ Template Parameters](#template-parameters)
-- [🏷️ Template Versioning](#template-versioning)
+- [📦 Available Templates](#-available-templates)
+- [✅ Requirements](#-requirements)
+- [🧭 How to Use Templates from GitHub](#-how-to-use-templates-from-github)
+- [🔐 Authentication / Service Connection](#-authentication--service-connection)
+- [🔧 Template Parameters](#-template-parameters)
+- [🔖 Template Versioning](#-template-versioning)
 
 **Standards**
-- [🧱 Design Principles](#design-principles)
-- [🔒 Security](#security)
+- [🧱 Design Principles](#-design-principles)
+- [🔒 Security](#-security)
 
 **Project**
-- [🤝 Contributing](#contributing)
-- [📄 License](#license)
-- [👥 Maintainers](#maintainers)
+- [🤝 Contributing](#-contributing)
+- [📄 License](#-license)
+- [👥 Maintainers](#-maintainers)
 
 **What's Next**
-- [🗺️ Roadmap](#roadmap)
-- [🌟 Goal](#goal)
+- [🔮 Roadmap](#-roadmap)
+- [🌟 Goal](#-goal)
 
 ---
 
@@ -46,10 +46,10 @@ This repository is a central place to define an Azure Pipelines template once an
 
 - 🔁 **Reusable Azure DevOps YAML templates**, hosted on GitHub and consumed cross-repo
 - 🧩 **Parameterized** - no project-specific values hardcoded into a template
-- 🎚️ **Composable by design** - each template gates its concerns behind boolean parameters, so a consumer enables only what it needs
+- 🔘 **Composable by design** - each template gates its concerns behind boolean parameters, so a consumer enables only what it needs
 - 🛡️ **Security-first** - secret scanning, SAST, dependency/SCA scanning, container image scanning, and IaC misconfiguration scanning are first-class, not bolted on
 - 💸 **No paid extensions required** - scanners (Trivy, Semgrep) are fetched at runtime; no marketplace tasks or licensed tooling
-- 🏷️ **Versioned releases** - consumers pin to a tag, so template changes never silently break existing pipelines
+- 🔖 **Versioned releases** - consumers pin to a tag, so template changes never silently break existing pipelines
 - 📚 **Documented** - every template has a corresponding page in [`docs/`](./docs) covering requirements, parameters, and usage examples
 
 ### 🤔 Why Use This Repository?
@@ -70,7 +70,7 @@ This repository is a central place to define an Azure Pipelines template once an
 |---|---|---|
 | `templates/ado-build-devsecops-pipeline.yaml` | Secret/SAST/dependency/image/IaC scanning, unit tests + coverage, Docker build/push, and multi-environment Helm chart validation - each concern independently toggleable | [ado-build-devsecops-pipeline.md](./docs/ado-build-devsecops-pipeline.md) |
 
-This table lists only what exists today. Planned templates are tracked in [🗺️ Roadmap](#roadmap), not listed here until they're real.
+This table lists only what exists today. Planned templates are tracked in [🔮 Roadmap](#-roadmap), not listed here until they're real.
 
 ### ✅ Requirements
 
@@ -118,7 +118,7 @@ Reusable YAML Templates
 
 Scope the service connection to read access on this repository only, following least privilege - it doesn't need write access or access to other repositories.
 
-### ⚙️ Template Parameters
+### 🔧 Template Parameters
 
 Templates are configurable through parameters rather than hardcoded, project-specific values. For example, `ado-build-devsecops-pipeline.yaml` exposes its Docker build inputs like this:
 
@@ -139,7 +139,7 @@ parameters:
 
 A consumer overrides only what differs from the default; everything else falls back to a sensible value. See each template's `parameters:` block, or its page in [`docs/`](./docs), for the authoritative list.
 
-### 🏷️ Template Versioning
+### 🔖 Template Versioning
 
 Consumers should reference a **tag**, not a branch:
 
@@ -188,7 +188,7 @@ Contributions are welcome:
 - 🔧 Improve an existing template or its documentation
 - 📬 Submit a pull request
 
-Changes are never pushed directly to `master` - open a PR against it. Please keep new templates parameterized (no hardcoded project-specific values), documented under `docs/`, and consistent with the [🧱 Design Principles](#design-principles) above.
+Changes are never pushed directly to `master` - open a PR against it. Please keep new templates parameterized (no hardcoded project-specific values), documented under `docs/`, and consistent with the [🧱 Design Principles](#-design-principles) above.
 
 ### 📄 License
 
@@ -202,7 +202,7 @@ Maintained by CloudDrove.
 
 ## What's Next
 
-### 🗺️ Roadmap
+### 🔮 Roadmap
 
 The current template covers one end-to-end DevSecOps flow. Planned additions, not yet available:
 
