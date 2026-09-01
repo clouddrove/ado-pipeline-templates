@@ -6,7 +6,7 @@ A collection of reusable Azure Pipelines YAML templates for DevSecOps CI/CD - bu
 
 ---
 
-This repository plays the same role for Azure Pipelines that [`clouddrove/github-shared-workflows`](https://github.com/clouddrove/github-shared-workflows) plays for GitHub Actions: a central place to define a pipeline template once and reference it, versioned, from any number of consumer repos.
+This repository is a central place to define an Azure Pipelines template once and reference it, versioned, from any number of consumer repos - instead of copy-pasting the same YAML into every pipeline.
 
 ### Key Features
 
