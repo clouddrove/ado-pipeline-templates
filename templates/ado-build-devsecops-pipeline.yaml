@@ -397,4 +397,7 @@ steps:
       testResultsFiles: 'TEST-*.xml'
       searchFolder: '$(Common.TestResultsDirectory)'
       testRunTitle: 'Security Scans'
+      mergeTestResults: true   # without this, each matched XML becomes its own run,
+                                # all sharing the same title - numbered 1, 2, 3... with
+                                # no way to tell which scan is which
       failTaskOnFailedTests: false
