@@ -23,21 +23,21 @@ parameters:
     type: string
     default: ''
 
-  - name: ResourceGroupName
-    type: string
-    default: ''
+  # - name: ResourceGroupName
+  #   type: string
+  #   default: ''
 
-  - name: StorageAccountName
-    type: string
-    default: ''
+  # - name: StorageAccountName
+  #   type: string
+  #   default: ''
 
-  - name: ContainerName
-    type: string
-    default: ''
+  # - name: ContainerName
+  #   type: string
+  #   default: ''
 
-  - name: Key
-    type: string
-    default: ''
+  # - name: Key
+  #   type: string
+  #   default: ''
 
   - name: environment
     type: string
@@ -91,12 +91,7 @@ stages:
 
                 cd "${{ parameters.terraformWorkingDirectory }}"
 
-                smurf stf init \
-                  --backend-config="resource_group_name=${{ parameters.ResourceGroupName }}" \
-                  --backend-config="storage_account_name=${{ parameters.StorageAccountName }}" \
-                  --backend-config="container_name=${{ parameters.ContainerName }}" \
-                  --backend-config="key=${{ parameters.Key }}"
-
+                smurf stf init
                 smurf stf validate
                 smurf stf plan
 
@@ -165,10 +160,6 @@ stages:
 
                 cd "${{ parameters.terraformWorkingDirectory }}"
 
-                smurf stf init \
-                  --backend-config="resource_group_name=${{ parameters.ResourceGroupName }}" \
-                  --backend-config="storage_account_name=${{ parameters.StorageAccountName }}" \
-                  --backend-config="container_name=${{ parameters.ContainerName }}" \
-                  --backend-config="key=${{ parameters.Key }}"
+                smurf stf init
 
                 smurf stf apply --auto-approve
