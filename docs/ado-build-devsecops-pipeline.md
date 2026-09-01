@@ -133,9 +133,16 @@ steps:
 | `chartRepoAlias` | string | `clouddrove` | Local alias for the added repo |
 | `chartName` | string | `helmchart` | Chart name within the repo |
 | `chartVersion` | string | `1.4.0` | Chart version to pull |
+| `helmLintStrict` | boolean | `true` | Adds `--strict` to `helm lint`, failing on warnings too, not just errors |
+| `kubeVersion` | string | `1.29.0` | Passed to `helm template --kube-version`, to catch API-version-specific issues |
+| `publishHelmArtifact` | boolean | `true` | Publish `helmArtifactSourceDir` as a pipeline artifact; only takes effect when `helmValidate` is also `true` |
+| `helmArtifactSourceDir` | string | `$(Build.SourcesDirectory)/helm` | Folder staged into the artifact |
+| `helmArtifactTargetSubfolder` | string | `helmchart` | Subfolder name within the staged artifact |
+| `helmArtifactName` | string | `drop` | Name of the published pipeline artifact |
 
 ### 📤 Outputs
 
 - 🧾 All scan steps publish JUnit results to `$(Common.TestResultsDirectory)`, consolidated into a single **Security Scans** test run via `PublishTestResults@2` at the end of the template.
 - 📊 `testCoverage` additionally publishes a **Unit Tests** run and a Cobertura code coverage summary.
+- 📦 `publishHelmArtifact` publishes `helmArtifactSourceDir` (the `helm/` folder, overrides included) as a pipeline artifact named `helmArtifactName` - a downstream Release pipeline can download it and run `helm upgrade --install` against those exact override values.
 - 🚫 Nothing in this template deploys or pushes a Helm chart - `helmValidate` only lints/renders/scans; wiring an actual `helm upgrade --install` is left to the consumer's release process.

@@ -89,6 +89,26 @@ parameters:
   - name: chartVersion
     type: string
     default: '1.4.0'
+  - name: helmLintStrict
+    type: boolean
+    default: true       # `helm lint --strict` fails on warnings too, not just errors
+  - name: kubeVersion
+    type: string
+    default: '1.29.0'   # passed to `helm template --kube-version` to catch API-version-specific issues
+
+  # ---- helm chart artifact (for a downstream Release pipeline) ----
+  - name: publishHelmArtifact
+    type: boolean
+    default: true       # only takes effect when helmValidate is also true
+  - name: helmArtifactSourceDir
+    type: string
+    default: '$(Build.SourcesDirectory)/helm'
+  - name: helmArtifactTargetSubfolder
+    type: string
+    default: 'helmchart'
+  - name: helmArtifactName
+    type: string
+    default: 'drop'
 
 steps:
   - ${{ if eq(parameters.dockerBuildPush, true) }}:
@@ -322,11 +342,18 @@ steps:
 
                 VALUES_ARGS="-f ${{ parameters.helmOverridesDir }}/values.yaml -f ${{ parameters.helmOverridesDir }}/values-${{ envName }}.yaml"
 
-                helm lint "$WORKDIR/${{ parameters.chartName }}" $VALUES_ARGS \
-                  --set image.repository=placeholder.azurecr.io/placeholder
+                LINT_FLAGS=""
+                if [ "$(echo '${{ parameters.helmLintStrict }}' | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  LINT_FLAGS="--strict"
+                fi
 
-                helm template "$WORKDIR/${{ parameters.chartName }}" $VALUES_ARGS \
+                helm lint "$WORKDIR/${{ parameters.chartName }}" $VALUES_ARGS \
                   --set image.repository=placeholder.azurecr.io/placeholder \
+                  $LINT_FLAGS
+
+                helm template release-test "$WORKDIR/${{ parameters.chartName }}" $VALUES_ARGS \
+                  --set image.repository=placeholder.azurecr.io/placeholder \
+                  --kube-version ${{ parameters.kubeVersion }} \
                   --skip-tests \
                   > "$WORKDIR/rendered-${{ envName }}.yaml"
 
@@ -347,6 +374,20 @@ steps:
                   --output "$(Common.TestResultsDirectory)/TEST-trivy-helm-${{ envName }}.xml" "$REPORT"
 
                 trivy convert --format json --severity ${{ parameters.scanSeverity }} --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
+
+      - ${{ if eq(parameters.publishHelmArtifact, true) }}:
+          - task: CopyFiles@2
+            displayName: 'Stage Chart Artifact'
+            inputs:
+              SourceFolder: '${{ parameters.helmArtifactSourceDir }}'
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/${{ parameters.helmArtifactTargetSubfolder }}'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Helm Chart Artifact'
+            inputs:
+              targetPath: '$(Build.ArtifactStagingDirectory)'
+              artifact: '${{ parameters.helmArtifactName }}'
+              publishLocation: 'pipeline'
 
   - task: PublishTestResults@2
     displayName: 'Publish Security Scan Results'
