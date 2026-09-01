@@ -75,7 +75,7 @@ This table lists only what exists today. Planned templates are tracked in [🔮 
 ### ✅ Requirements
 
 - An Azure DevOps organization/project using **YAML pipelines**
-- A **GitHub service connection** in that project with read access to this repository (it's private)
+- A **GitHub service connection** in that project - Azure DevOps requires one for `type: github` repository resources even though this repository is public; there's no anonymous-access option
 - Per-template requirements (additional service connections, variable groups, expected file layout) are listed on each template's page in [`docs/`](./docs)
 
 ### 🧭 How to Use Templates from GitHub
@@ -103,7 +103,7 @@ See each template's page in [`docs/`](./docs) for a complete, ready-to-copy usag
 
 ### 🔐 Authentication / Service Connection
 
-Azure DevOps needs a **GitHub service connection** to pull templates from this repository, since it's private:
+Azure DevOps needs a **GitHub service connection** to pull templates from this repository. This is required regardless of repository visibility - a `type: github` resource without an `endpoint` fails validation with `Repository templates requires an endpoint`, even against a public repo:
 
 ```
 Azure DevOps
@@ -192,7 +192,7 @@ Changes are never pushed directly to `master` - open a PR against it. Please kee
 
 ### 📄 License
 
-This repository is currently private to CloudDrove. A license will be selected if and when it's made public.
+This repository is public. A license has not yet been chosen - until one is added, default copyright applies and reuse beyond referencing the templates as intended isn't explicitly granted.
 
 ### 👥 Maintainers
 
