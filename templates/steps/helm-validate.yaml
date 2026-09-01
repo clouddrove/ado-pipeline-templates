@@ -1,0 +1,72 @@
+parameters:
+  - name: envName
+    type: string      # dev / staging / prod - expects helm/overrides/values-<envName>.yaml to exist
+  - name: overridesDir
+    type: string
+    default: '$(Build.SourcesDirectory)/helm/overrides'
+  - name: chartRepoUrl
+    type: string
+    default: 'https://charts.clouddrove.com/'
+  - name: chartRepoAlias
+    type: string
+    default: 'clouddrove'
+  - name: chartName
+    type: string
+    default: 'helmchart'
+  - name: chartVersion
+    type: string
+    default: '1.4.0'
+  - name: severity
+    type: string
+    default: 'CRITICAL,HIGH'
+  - name: exitCode
+    type: string
+    default: '1'
+
+steps:
+  - task: HelmInstaller@1
+    displayName: 'Install Helm'
+    inputs:
+      helmVersionToInstall: 'latest'
+
+  - task: Bash@3
+    displayName: 'Helm Lint/Render/Scan - ${{ parameters.envName }}'
+    inputs:
+      targetType: 'inline'
+      script: |
+        set -e
+        helm repo add ${{ parameters.chartRepoAlias }} ${{ parameters.chartRepoUrl }} --force-update
+        helm repo update ${{ parameters.chartRepoAlias }}
+
+        WORKDIR=$(mktemp -d)
+        helm pull ${{ parameters.chartRepoAlias }}/${{ parameters.chartName }} \
+          --version ${{ parameters.chartVersion }} --untar --untardir "$WORKDIR"
+
+        VALUES_ARGS="-f ${{ parameters.overridesDir }}/values.yaml -f ${{ parameters.overridesDir }}/values-${{ parameters.envName }}.yaml"
+
+        helm lint "$WORKDIR/${{ parameters.chartName }}" $VALUES_ARGS \
+          --set image.repository=placeholder.azurecr.io/placeholder
+
+        helm template "$WORKDIR/${{ parameters.chartName }}" $VALUES_ARGS \
+          --set image.repository=placeholder.azurecr.io/placeholder \
+          --skip-tests \
+          > "$WORKDIR/rendered-${{ parameters.envName }}.yaml"
+
+        if ! command -v trivy &> /dev/null; then
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+        fi
+        JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+        if [ ! -f "$JUNIT_TPL" ]; then
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+        fi
+        mkdir -p "$(Common.TestResultsDirectory)"
+
+        REPORT="$(Agent.TempDirectory)/trivy-helm-${{ parameters.envName }}-report.json"
+        trivy config --include-non-failures --format json --output "$REPORT" "$WORKDIR/rendered-${{ parameters.envName }}.yaml"
+
+        trivy convert --format table --severity ${{ parameters.severity }} "$REPORT"
+        # Not severity-filtering this conversion - see iac-scan.yaml for why.
+        trivy convert --format template --template "@$JUNIT_TPL" \
+          --output "$(Common.TestResultsDirectory)/TEST-trivy-helm-${{ parameters.envName }}.xml" "$REPORT"
+
+        trivy convert --format json --severity ${{ parameters.severity }} --exit-code ${{ parameters.exitCode }} --output /dev/null "$REPORT"
