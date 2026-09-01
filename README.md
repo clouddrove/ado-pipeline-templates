@@ -192,7 +192,7 @@ Changes are never pushed directly to `master` - open a PR against it. Please kee
 
 ### 📄 License
 
-This repository is public. A license has not yet been chosen - until one is added, default copyright applies and reuse beyond referencing the templates as intended isn't explicitly granted.
+Licensed under the [Apache License 2.0](./LICENSE), matching [`github-shared-workflows`](https://github.com/clouddrove/github-shared-workflows) and CloudDrove's other open-source repositories.
 
 ### 👥 Maintainers
 
