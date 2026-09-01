@@ -1,10 +1,30 @@
-# ADO Pipeline Templates
+<h1 align="center">ADO Pipeline Templates</h1>
 
-Reusable Azure Pipelines YAML template, shared across repos the same way [`github-shared-workflows`](https://github.com/clouddrove/github-shared-workflows) shares GitHub Actions workflows: one repo holds the template, consumer pipelines reference it by path + version instead of copy-pasting YAML.
+<p align="center">
+A collection of reusable Azure Pipelines YAML templates for DevSecOps CI/CD - build, scan, test, and validate workflows shared across repositories instead of duplicated in each one.
+</p>
 
-## How to use
+---
 
-Azure Pipelines' equivalent of GitHub's `uses:` is a `resources.repositories` entry plus a `@alias` suffix on the `template:` reference. This repo is currently **private**, so consumer pipelines need a GitHub service connection with read access to it.
+This repository plays the same role for Azure Pipelines that [`clouddrove/github-shared-workflows`](https://github.com/clouddrove/github-shared-workflows) plays for GitHub Actions: a central place to define a pipeline template once and reference it, versioned, from any number of consumer repos.
+
+### Key Features
+
+- **Composable by design** - each template gates its concerns behind boolean parameters, so a consumer enables only what it needs
+- **Security-first** - secret scanning, SAST, dependency/SCA scanning, container image scanning, and IaC misconfiguration scanning are first-class, not bolted on
+- **No paid extensions required** - scanners (Trivy, Semgrep) are fetched at runtime; no marketplace tasks or licensed tooling
+- **Versioned releases** - consumers pin to a tag, so template changes never silently break existing pipelines
+- **Documented** - every template has a corresponding page in [`docs/`](./docs) covering requirements, parameters, and usage examples
+
+## Requirements
+
+- An Azure DevOps organization/project with **YAML pipelines**
+- A **GitHub service connection** in that project with read access to this repository (it's private)
+- Per-template requirements (service connections, variable groups, expected file layout) are listed on each template's page in [`docs/`](./docs)
+
+## How to Use
+
+Azure Pipelines' equivalent of GitHub Actions' `uses:` is a `resources.repositories` entry plus a `@alias` suffix on the `template:` reference:
 
 ```yaml
 resources:
@@ -12,48 +32,25 @@ resources:
     - repository: templates
       type: github
       name: clouddrove/ado-pipeline-templates
-      ref: refs/tags/v1.0.0          # pin to a tag; avoid tracking a branch in production
-      endpoint: <github-service-connection-name>   # Project Settings -> Service connections -> GitHub
+      ref: refs/tags/v1.0.0                        # pin to a released tag
+      endpoint: <github-service-connection-name>
 
 steps:
-  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+  - template: templates/<template-file>.yaml@templates
     parameters:
-      # flip any of these to false to skip that concern
-      secretsScan: true
-      sastScan: true
-      dependencyScan: true
-      testCoverage: true
-      dockerBuildPush: true
-      imageScan: true      # only takes effect when dockerBuildPush is also true
-      iacScan: true
-      helmValidate: true
-      containerRegistryServiceConnection: '$(containerRegistryServiceConnection)'
-      imageRepository: '$(imageRepository)'
+      # see the template's docs/ page for the full parameter list
 ```
+
+See each template's page in [`docs/`](./docs) for a complete usage example and parameter reference.
+
+## Templates
+
+| Template | Description | Docs |
+|---|---|---|
+| `templates/ado-build-devsecops-pipeline.yaml` | Secret/SAST/dependency/image/IaC scanning, unit tests + coverage, Docker build/push, and multi-environment Helm chart validation - each concern independently toggleable | [ado-build-devsecops-pipeline.md](./docs/ado-build-devsecops-pipeline.md) |
+
+Additional templates will be added here as they're extracted and generalized from consumer pipelines.
 
 ## Versioning
 
-Pin consumers to a **tag** (`refs/tags/vX.Y.Z`), not a branch. Bump the tag on breaking parameter changes. Don't push directly to `master`/`main` — land changes via PR and tag a release once merged.
-
-## Template
-
-`templates/ado-build-devsecops-pipeline.yaml` is one template covering the full DevSecOps flow, with each concern gated behind its own boolean parameter:
-
-| Toggle | What it runs when `true` |
-|---|---|
-| `secretsScan` | Trivy secret scan (fs), fails on any finding |
-| `sastScan` | Semgrep SAST scan |
-| `dependencyScan` | Trivy dependency/SCA scan (fs) |
-| `testCoverage` | Node.js unit tests + coverage (JUnit + Cobertura) |
-| `dockerBuildPush` | Docker build, then push, via a registry service connection |
-| `imageScan` | Trivy container image scan — only runs if `dockerBuildPush` is also `true` |
-| `iacScan` | Trivy config/misconfig scan (Dockerfile) |
-| `helmValidate` | For each env in `helmEnvironments` (default `['dev','staging','prod']`): pull a public Helm chart, lint + render with that env's overrides, Trivy config scan the rendered manifest |
-
-All scan steps publish JUnit results to `$(Common.TestResultsDirectory)`, picked up by a single `PublishTestResults@2` at the end of the template — the consumer doesn't need to wire that up separately.
-
-See the template's own `parameters:` block for every configurable input (paths, severities, chart repo/version, node version, etc.) and their defaults — that's the authoritative list.
-
-## Origin
-
-Extracted from [`clouddrove-sandbox/az-template`](https://dev.azure.com/clouddrove-sandbox/az-template) (Azure DevOps), which still holds its own local copy until this repo has a remote and its consumer pipeline is cut over to the `@templates` reference above. Started as 8 separate step templates, consolidated into this one file so callers control each concern with a single boolean instead of picking which templates to wire in.
+Consumers should pin to a **tag** (`refs/tags/vX.Y.Z`), never a branch, so that changes here are opt-in. Changes land via pull request and are never pushed directly to `master`; a tag is cut once a change is merged and ready for consumption.
