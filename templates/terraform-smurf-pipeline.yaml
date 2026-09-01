@@ -1,0 +1,174 @@
+parameters:
+  - name: terraformWorkingDirectory
+    type: string
+    default: ''
+
+  - name: terraformVersion
+    type: string
+    default: ''
+
+  - name: goVersion
+    type: string
+    default: ''
+
+  - name: smurfVersion
+    type: string
+    default: ''
+
+  - name: ServiceArm
+    type: string
+    default: ''
+
+  - name: agentPool
+    type: string
+    default: ''
+
+  - name: ResourceGroupName
+    type: string
+    default: ''
+
+  - name: StorageAccountName
+    type: string
+    default: ''
+
+  - name: ContainerName
+    type: string
+    default: ''
+
+  - name: Key
+    type: string
+    default: ''
+
+  - name: environment
+    type: string
+    default: ''
+
+stages:
+  - stage: terraform_init_plan
+    displayName: Terraform Init and Plan
+    pool:
+      name: ${{ parameters.agentPool }}
+    jobs:
+      - job: terraform_init_plan
+        displayName: Terraform Init, Validate and Plan
+        steps:
+          - checkout: self
+
+          - task: TerraformInstaller@1
+            displayName: Install Terraform
+            inputs:
+              terraformVersion: ${{ parameters.terraformVersion }}
+
+          - task: GoTool@0
+            displayName: Install Go
+            inputs:
+              version: ${{ parameters.goVersion }}
+
+          - bash: |
+              set -euo pipefail
+              export PATH="$PATH:$(go env GOPATH)/bin"
+
+              go install github.com/clouddrove/smurf@${{ parameters.smurfVersion }}
+
+              smurf --version
+            displayName: Install Smurf
+
+          - task: AzureCLI@2
+            displayName: Smurf Terraform Init, Validate and Plan
+            inputs:
+              azureSubscription: ${{ parameters.ServiceArm }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                export PATH="$PATH:$(go env GOPATH)/bin"
+
+                export ARM_USE_OIDC=true
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id --output tsv)"
+
+                cd "${{ parameters.terraformWorkingDirectory }}"
+
+                smurf stf init \
+                  --backend-config="resource_group_name=${{ parameters.ResourceGroupName }}" \
+                  --backend-config="storage_account_name=${{ parameters.StorageAccountName }}" \
+                  --backend-config="container_name=${{ parameters.ContainerName }}" \
+                  --backend-config="key=${{ parameters.Key }}"
+
+                smurf stf validate
+                smurf stf plan
+
+  - stage: terraform_approval
+    displayName: Terraform Approval
+    dependsOn: terraform_init_plan
+    condition: succeeded()
+    jobs:
+      - deployment: validatefordeploy
+        displayName: Wait for Approval
+        environment: ${{ parameters.environment }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - bash: |
+                    echo "Approval granted. Terraform apply can start."
+                  displayName: Approval granted
+
+  - stage: terraform_apply
+    displayName: Terraform Apply
+    pool:
+      name: ${{ parameters.agentPool }}
+    dependsOn: terraform_approval
+    condition: succeeded()
+    jobs:
+      - job: terraform_apply
+        displayName: Terraform Apply with Smurf
+        steps:
+          - checkout: self
+
+          - task: TerraformInstaller@1
+            displayName: Install Terraform
+            inputs:
+              terraformVersion: ${{ parameters.terraformVersion }}
+
+          - task: GoTool@0
+            displayName: Install Go
+            inputs:
+              version: ${{ parameters.goVersion }}
+
+          - bash: |
+              set -euo pipefail
+              export PATH="$PATH:$(go env GOPATH)/bin"
+
+              go install github.com/clouddrove/smurf@${{ parameters.smurfVersion }}
+
+              smurf --version
+            displayName: Install Smurf
+
+          - task: AzureCLI@2
+            displayName: Smurf Terraform Init and Apply
+            inputs:
+              azureSubscription: ${{ parameters.ServiceArm }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                export PATH="$PATH:$(go env GOPATH)/bin"
+
+                export ARM_USE_OIDC=true
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id --output tsv)"
+
+                cd "${{ parameters.terraformWorkingDirectory }}"
+
+                smurf stf init \
+                  --backend-config="resource_group_name=${{ parameters.ResourceGroupName }}" \
+                  --backend-config="storage_account_name=${{ parameters.StorageAccountName }}" \
+                  --backend-config="container_name=${{ parameters.ContainerName }}" \
+                  --backend-config="key=${{ parameters.Key }}"
+
+                smurf stf apply --auto-approve

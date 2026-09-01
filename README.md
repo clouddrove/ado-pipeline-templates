@@ -66,9 +66,10 @@ This repository is a central place to define an Azure Pipelines template once an
 
 ### 📦 Available Templates
 
-| Template | Purpose | Docs |
-|---|---|---|
-| `templates/ado-build-devsecops-pipeline.yaml` | Secret/SAST/dependency/image/IaC scanning, unit tests + coverage, Docker build/push, and multi-environment Helm chart validation - each concern independently toggleable | [ado-build-devsecops-pipeline.md](./docs/ado-build-devsecops-pipeline.md) |
+| Template | Type | Purpose | Docs |
+|---|---|---|---|
+| `templates/ado-build-devsecops-pipeline.yaml` | Step | Secret/SAST/dependency/image/IaC scanning, unit tests + coverage, Docker build/push, and multi-environment Helm chart validation - each concern independently toggleable | [ado-build-devsecops-pipeline.md](./docs/ado-build-devsecops-pipeline.md) |
+| `templates/terraform-smurf-pipeline.yaml` | Stage | Init/validate/plan → manual approval → apply, using [`smurf`](https://github.com/clouddrove/smurf) and OIDC/workload-identity auth to Azure | [terraform-smurf-pipeline.md](./docs/terraform-smurf-pipeline.md) |
 
 This table lists only what exists today. Planned templates are tracked in [🔮 Roadmap](#-roadmap), not listed here until they're real.
 
@@ -204,23 +205,22 @@ Maintained by CloudDrove.
 
 ### 🔮 Roadmap
 
-The current template covers one end-to-end DevSecOps flow. Planned additions, not yet available:
+Two templates exist today: one end-to-end DevSecOps flow (step template) and one Terraform init/plan/approve/apply flow (stage template, via `smurf`). Planned additions, not yet available:
 
 **More templates**, likely organized by category as the collection grows:
 
 ```
 containers/    docker-build, docker-push, container-scan
-infrastructure/ terraform-init, terraform-validate, terraform-plan, terraform-apply, terraform-destroy
+infrastructure/ terraform-destroy, terraform-fmt/lint
 deployment/    aks, kubernetes, helm-deploy, app-service, azure-functions
 quality/       sonarqube, additional SAST/lint tooling
 utilities/     approvals, notifications, artifact management, versioning
 ```
 
-**Example end-to-end pipeline patterns**, once the templates above exist to compose them from:
+**Example end-to-end pipeline patterns**, once more templates exist to compose them from:
 
 ```
 Node.js  → Build → Test → Docker Build → Security Scan → ACR → AKS
-Terraform → Format → Validate → Security Scan → Plan → Approval → Apply
 .NET     → Build → Test → SonarQube → Docker → ACR → AKS
 Python   → Test → SAST → Docker Build → Container Scan → Deploy
 ```
