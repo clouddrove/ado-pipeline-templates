@@ -1,7 +1,7 @@
 <h2 align="center">🏗️ Terraform (Smurf) Pipeline Template</h2>
 
 <p align="center">
-<a href="../templates/terraform-smurf-pipeline.yaml"><strong>📄 Template reference</strong></a>
+<a href="../templates/ado-terraform-pipeline.yaml"><strong>📄 Template reference</strong></a>
 </p>
 
 A three-stage Azure Pipelines **stage template** - init/validate/plan, a manual approval gate, then apply - built around [`clouddrove/smurf`](https://github.com/clouddrove/smurf), CloudDrove's Terraform CLI wrapper, with OIDC/workload-identity federation to Azure (no stored client secret).
@@ -47,7 +47,7 @@ resources:
       endpoint: <github-service-connection-name>
 
 stages:
-  - template: templates/terraform-smurf-pipeline.yaml@templates
+  - template: templates/ado-terraform-pipeline.yaml@templates
     parameters:
       terraformWorkingDirectory: '$(Build.SourcesDirectory)/infra'
       terraformVersion: '1.9.5'
