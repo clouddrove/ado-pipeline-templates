@@ -1,4 +1,4 @@
-<h1 align="center">ADO Pipeline Templates</h1>
+<h1 align="center">🚀 ADO Pipeline Templates</h1>
 
 <p align="center">
 Reusable Azure DevOps YAML pipeline templates, hosted on GitHub - built to reduce duplicate pipeline code and standardize CI/CD across projects.
@@ -6,43 +6,43 @@ Reusable Azure DevOps YAML pipeline templates, hosted on GitHub - built to reduc
 
 ---
 
-## Overview
+## 📖 Overview
 
 This repository is a central place to define an Azure Pipelines template once and reference it, versioned, from any number of consumer repos - instead of copy-pasting the same YAML into every pipeline. Templates are parameterized rather than hardcoded to a specific project, so the same template serves many consumers.
 
-## Key Features
+## ✨ Key Features
 
-- **Reusable Azure DevOps YAML templates**, hosted on GitHub and consumed cross-repo
-- **Parameterized** - no project-specific values hardcoded into a template
-- **Composable by design** - each template gates its concerns behind boolean parameters, so a consumer enables only what it needs
-- **Security-first** - secret scanning, SAST, dependency/SCA scanning, container image scanning, and IaC misconfiguration scanning are first-class, not bolted on
-- **No paid extensions required** - scanners (Trivy, Semgrep) are fetched at runtime; no marketplace tasks or licensed tooling
-- **Versioned releases** - consumers pin to a tag, so template changes never silently break existing pipelines
-- **Documented** - every template has a corresponding page in [`docs/`](./docs) covering requirements, parameters, and usage examples
+- 🔁 **Reusable Azure DevOps YAML templates**, hosted on GitHub and consumed cross-repo
+- 🧩 **Parameterized** - no project-specific values hardcoded into a template
+- 🎚️ **Composable by design** - each template gates its concerns behind boolean parameters, so a consumer enables only what it needs
+- 🛡️ **Security-first** - secret scanning, SAST, dependency/SCA scanning, container image scanning, and IaC misconfiguration scanning are first-class, not bolted on
+- 💸 **No paid extensions required** - scanners (Trivy, Semgrep) are fetched at runtime; no marketplace tasks or licensed tooling
+- 🏷️ **Versioned releases** - consumers pin to a tag, so template changes never silently break existing pipelines
+- 📚 **Documented** - every template has a corresponding page in [`docs/`](./docs) covering requirements, parameters, and usage examples
 
-## Why Use This Repository?
+## 🤔 Why Use This Repository?
 
-- Avoid rewriting the same pipeline logic for every project
-- Standardize CI/CD stages, naming, and deployment patterns across teams
-- Maintain security and quality controls in one place instead of N places
-- Reduce onboarding time for new projects and new team members
-- Fix a bug or add a check once, and every consumer benefits after bumping their pinned version
+- 🔂 Avoid rewriting the same pipeline logic for every project
+- 📏 Standardize CI/CD stages, naming, and deployment patterns across teams
+- 🔒 Maintain security and quality controls in one place instead of N places
+- ⚡ Reduce onboarding time for new projects and new team members
+- 🛠️ Fix a bug or add a check once, and every consumer benefits after bumping their pinned version
 
-## Available Templates
+## 📦 Available Templates
 
 | Template | Purpose | Docs |
 |---|---|---|
 | `templates/ado-build-devsecops-pipeline.yaml` | Secret/SAST/dependency/image/IaC scanning, unit tests + coverage, Docker build/push, and multi-environment Helm chart validation - each concern independently toggleable | [ado-build-devsecops-pipeline.md](./docs/ado-build-devsecops-pipeline.md) |
 
-This table lists only what exists today. Planned templates are tracked in [Roadmap](#roadmap), not listed here until they're real.
+This table lists only what exists today. Planned templates are tracked in [🗺️ Roadmap](#roadmap), not listed here until they're real.
 
-## Requirements
+## ✅ Requirements
 
 - An Azure DevOps organization/project using **YAML pipelines**
 - A **GitHub service connection** in that project with read access to this repository (it's private)
 - Per-template requirements (additional service connections, variable groups, expected file layout) are listed on each template's page in [`docs/`](./docs)
 
-## How to Use Templates from GitHub
+## 🧭 How to Use Templates from GitHub
 
 Azure Pipelines' equivalent of GitHub Actions' `uses:` is a `resources.repositories` entry plus a `@alias` suffix on the `template:` reference:
 
@@ -65,7 +65,7 @@ steps:
 
 See each template's page in [`docs/`](./docs) for a complete, ready-to-copy usage example.
 
-## Authentication / Service Connection
+## 🔐 Authentication / Service Connection
 
 Azure DevOps needs a **GitHub service connection** to pull templates from this repository, since it's private:
 
@@ -82,7 +82,7 @@ Reusable YAML Templates
 
 Scope the service connection to read access on this repository only, following least privilege - it doesn't need write access or access to other repositories.
 
-## Template Parameters
+## ⚙️ Template Parameters
 
 Templates are configurable through parameters rather than hardcoded, project-specific values. For example, `ado-build-devsecops-pipeline.yaml` exposes its Docker build inputs like this:
 
@@ -103,58 +103,58 @@ parameters:
 
 A consumer overrides only what differs from the default; everything else falls back to a sensible value. See each template's `parameters:` block, or its page in [`docs/`](./docs), for the authoritative list.
 
-## Template Versioning
+## 🏷️ Template Versioning
 
 Consumers should reference a **tag**, not a branch:
 
 ```yaml
-ref: refs/tags/v1.2.0     # recommended
+ref: refs/tags/v1.2.0     # ✅ recommended
 ```
 
 ```yaml
-ref: refs/heads/master    # avoid for production - a later change here could break every consumer
+ref: refs/heads/master    # ⚠️ avoid for production - a later change here could break every consumer
 ```
 
 This repository follows [Semantic Versioning](https://semver.org/) (`v1.0.0`, `v1.1.0`, `v2.0.0`, ...). A breaking parameter or behavior change bumps the major version. Changes land via pull request - never a direct push to `master` - and a tag is cut once a change is merged and ready for consumption.
 
-## Design Principles
+## 🧱 Design Principles
 
 Templates in this repository aim to be:
 
-- Reusable across projects and teams
-- Secure by default
-- Parameterized, with minimal hardcoding
-- Easy to understand and integrate
-- Backward compatible where possible
-- Well documented
+- ♻️ Reusable across projects and teams
+- 🛡️ Secure by default
+- 🧩 Parameterized, with minimal hardcoding
+- 🔍 Easy to understand and integrate
+- ⏪ Backward compatible where possible
+- 📚 Well documented
 
-## Security
+## 🔒 Security
 
-- Secrets are never stored inside a template - use Azure DevOps secret variables, variable groups, or Azure Key Vault
-- Prefer workload identity / federated authentication over long-lived credentials where the target supports it
-- Service connections follow least-privilege scoping
-- Security scanning (secrets, SAST, dependency/SCA, container image, IaC misconfiguration) is built into templates, not left as an afterthought for consumers to add
-- Avoid exposing credentials in pipeline logs
+- 🚫 Secrets are never stored inside a template - use Azure DevOps secret variables, variable groups, or Azure Key Vault
+- 🪪 Prefer workload identity / federated authentication over long-lived credentials where the target supports it
+- 🔑 Service connections follow least-privilege scoping
+- 🕵️ Security scanning (secrets, SAST, dependency/SCA, container image, IaC misconfiguration) is built into templates, not left as an afterthought for consumers to add
+- 🙈 Avoid exposing credentials in pipeline logs
 
-## Contributing
+## 🤝 Contributing
 
 Contributions are welcome:
 
-- Report issues or request a new template
-- Improve an existing template or its documentation
-- Submit a pull request
+- 🐛 Report issues or request a new template
+- 🔧 Improve an existing template or its documentation
+- 📬 Submit a pull request
 
-Changes are never pushed directly to `master` - open a PR against it. Please keep new templates parameterized (no hardcoded project-specific values), documented under `docs/`, and consistent with the [Design Principles](#design-principles) above.
+Changes are never pushed directly to `master` - open a PR against it. Please keep new templates parameterized (no hardcoded project-specific values), documented under `docs/`, and consistent with the [🧱 Design Principles](#design-principles) above.
 
-## License
+## 📄 License
 
 This repository is currently private to CloudDrove. A license will be selected if and when it's made public.
 
-## Maintainers
+## 👥 Maintainers
 
 Maintained by CloudDrove.
 
-## Roadmap
+## 🗺️ Roadmap
 
 The current template covers one end-to-end DevSecOps flow. Planned additions, not yet available:
 
@@ -179,7 +179,7 @@ Python   → Test → SAST → Docker Build → Container Scan → Deploy
 
 **Broader platform support**: Kubernetes/AKS deployment (this repo currently only validates Helm charts, it doesn't deploy them), Azure App Service and Functions, SonarQube, additional language coverage (.NET, Python), and eventually AWS/GCP deployment templates.
 
-## Goal
+## 🌟 Goal
 
 The long-term goal isn't just a collection of YAML files - it's opinionated, production-ready CI/CD patterns that teams can adopt with minimal configuration, with security and maintainability built in rather than bolted on:
 
