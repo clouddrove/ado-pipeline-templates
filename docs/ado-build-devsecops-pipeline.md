@@ -12,6 +12,7 @@ A single Azure Pipelines step template covering secret scanning, SAST, dependenc
 
 **Getting Started**
 - [📋 Requirements](#-requirements)
+- [`helmOverridesDir` vs `chartSource`](#helmoverridesdir-vs-chartsource)
 - [🚀 Usage](#-usage)
 
 **Reference**
@@ -36,7 +37,56 @@ A single Azure Pipelines step template covering secret scanning, SAST, dependenc
 | A `containerRegistryServiceConnection` / `registryLoginServer` / `imageRepository` variable group | `dockerBuildPush`, `imageScan` | `registryLoginServer` must be the full FQDN (e.g. `myregistry.azurecr.io`), not the bare registry name - the template validates this and fails fast with a clear error if it looks wrong |
 | A `Dockerfile` at the path passed to `dockerfilePath` | `dockerBuildPush`, `imageScan`, `iacScan` | |
 | A Node.js app directory with `npm run test:coverage` producing `test-results.xml` (JUnit) and `coverage/cobertura-coverage.xml` | `testCoverage` | See the sample app in [`clouddrove-sandbox/az-template`](https://dev.azure.com/clouddrove-sandbox/az-template) for a reference implementation |
-| Helm override values (`values.yaml` + `values-<env>.yaml` per environment) | `helmValidate` | The template pulls the chart itself from `chartRepoUrl`; it doesn't ship one |
+| Override values files at `helmOverridesDir`: `values.yaml` + one `values-<env>.yaml` per entry in `helmEnvironments` | `helmValidate` | **Required no matter what `chartSource` is** - see [`helmOverridesDir` vs `chartSource`](#helmoverridesdir-vs-chartsource) below, this is the single most common setup mistake |
+
+### `helmOverridesDir` vs `chartSource`
+
+These are two independent settings, and mixing them up is the #1 cause of `helmValidate` failing with something like:
+
+```
+Error: open /path/to/your/repo/helm/k8s/values.yaml: no such file or directory
+```
+
+- **`chartSource`** (+ `chartRepoUrl`/`chartRepoAlias`/`chartName`/`chartVersion`, or `localChartPath`) says **where the chart's `Chart.yaml` and `templates/` come from** - either pulled from a Helm repository (`chartSource: repo`, the default) or a path already in your own repo (`chartSource: local`).
+- **`helmOverridesDir`** says where the **override *values* files** live - `values.yaml` plus one `values-<env>.yaml` per entry in `helmEnvironments`. These are layered on top of the chart with `-f` **regardless of where the chart itself came from**. There is no `chartSource` setting that makes this optional.
+
+In other words: even a chart pulled from a public repo needs override values from `helmOverridesDir`, and even a local chart still needs a *separate* `helmOverridesDir` - it does not automatically use the chart's own `values.yaml`.
+
+If `helmEnvironments: ['dev', 'stage', 'prod']`, the filenames must match **exactly** - `values-stage.yaml`, not `values-staging.yaml`.
+
+**Using the public chart** (`chartSource: repo`, the default) - only override values are needed in your repo:
+
+```
+your-repo/
+└── helm/
+    └── overrides/              # helmOverridesDir points here
+        ├── values.yaml
+        ├── values-dev.yaml
+        ├── values-stage.yaml
+        └── values-prod.yaml
+```
+
+**Using your own chart** (`chartSource: local`) - the chart and its overrides are two *separate* directories, even if both live under `helm/`:
+
+```
+your-repo/
+└── helm/
+    ├── my-chart/               # localChartPath points here
+    │   ├── Chart.yaml
+    │   └── templates/
+    └── overrides/              # helmOverridesDir points here - NOT the same folder as my-chart/
+        ├── values.yaml
+        ├── values-dev.yaml
+        ├── values-stage.yaml
+        └── values-prod.yaml
+```
+
+```yaml
+parameters:
+  chartSource: 'local'
+  localChartPath: '$(Build.SourcesDirectory)/helm/my-chart'
+  helmOverridesDir: '$(Build.SourcesDirectory)/helm/overrides'
+```
 
 ### 🚀 Usage
 
@@ -76,14 +126,15 @@ steps:
       appDir: '$(Build.SourcesDirectory)/src'
 ```
 
-**📁 Local chart** - the chart lives in this repo instead of a Helm chart repository:
+**📁 Local chart** - the chart lives in this repo instead of a Helm chart repository. `helmOverridesDir` is still required and is a *different* directory from `localChartPath` - see [`helmOverridesDir` vs `chartSource`](#helmoverridesdir-vs-chartsource) if this trips you up:
 
 ```yaml
 steps:
   - template: templates/ado-build-devsecops-pipeline.yaml@templates
     parameters:
       chartSource: 'local'
-      localChartPath: '$(Build.SourcesDirectory)/helm/my-app'
+      localChartPath: '$(Build.SourcesDirectory)/helm/my-app'      # Chart.yaml + templates/ live here
+      helmOverridesDir: '$(Build.SourcesDirectory)/helm/overrides' # values.yaml + values-<env>.yaml live here - not the same folder
 ```
 
 **🔎 Scans only** - a PR-validation pipeline that shouldn't build, push, or touch Helm at all:
