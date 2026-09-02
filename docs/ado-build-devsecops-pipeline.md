@@ -86,6 +86,55 @@ steps:
       localChartPath: '$(Build.SourcesDirectory)/helm/my-app'
 ```
 
+**🔎 Scans only** - a PR-validation pipeline that shouldn't build, push, or touch Helm at all:
+
+```yaml
+steps:
+  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      secretsScan: true
+      sastScan: true
+      dependencyScan: true
+      testCoverage: true
+      dockerBuildPush: false     # imageScan is skipped automatically since it depends on this
+      iacScan: false             # no Dockerfile to scan yet in a PR-only flow
+      helmValidate: false
+```
+
+**📂 Monorepo** - app and Dockerfile live in a subdirectory, not the repo root:
+
+```yaml
+steps:
+  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      scanPath: '$(Build.SourcesDirectory)/services/api'
+      appDir: '$(Build.SourcesDirectory)/services/api'
+      dockerfilePath: '$(Build.SourcesDirectory)/services/api/Dockerfile'
+      buildContext: '$(Build.SourcesDirectory)/services/api'
+      iacScanPath: '$(Build.SourcesDirectory)/services/api/Dockerfile'
+      helmOverridesDir: '$(Build.SourcesDirectory)/services/api/helm/overrides'
+```
+
+**🌎 Custom environments and stricter gate** - only two Helm environments, and CRITICAL-only fails the build:
+
+```yaml
+steps:
+  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      helmEnvironments: ['dev', 'prod']   # no staging for this app
+      scanSeverity: 'CRITICAL'            # HIGH findings are reported but won't fail the build
+      kubeVersion: '1.28.0'               # match the actual AKS version this app targets
+```
+
+**🚫 No artifact publish** - validate the Helm overrides, but don't stage/publish anything for a Release pipeline:
+
+```yaml
+steps:
+  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      publishHelmArtifact: false
+```
+
 ---
 
 ## Reference

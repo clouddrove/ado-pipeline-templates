@@ -37,6 +37,8 @@ Unlike [`ado-build-devsecops-pipeline.yaml`](./ado-build-devsecops-pipeline.md),
 
 ### 🚀 Usage
 
+**✅ Single environment** - the common case:
+
 ```yaml
 resources:
   repositories:
@@ -63,6 +65,55 @@ stages:
 ```
 
 This produces three stages: `terraform_init_plan` runs `smurf stf init` / `validate` / `plan`; `terraform_approval` is a `deployment` job that waits on the named Environment's approval check; `terraform_apply` then runs `smurf stf init` again followed by `smurf stf apply --auto-approve`.
+
+**🚀 Latest tool versions** - let `TerraformInstaller@1` and `GoTool@0` resolve the newest release instead of pinning:
+
+```yaml
+stages:
+  - template: templates/ado-terraform-pipeline.yaml@templates
+    parameters:
+      terraformWorkingDirectory: '$(Build.SourcesDirectory)/infra'
+      terraformVersion: 'latest'
+      goVersion: '1.x'
+      smurfVersion: 'latest'
+      agentPool: 'my-self-hosted-pool'
+      ServiceArm: 'my-azure-arm-oidc-connection'
+      ResourceGroupName: 'tfstate-rg'
+      StorageAccountName: 'tfstateacct001'
+      ContainerName: 'tfstate'
+      Key: 'myproject/terraform.tfstate'
+      environment: 'Dev-Terraform-Approval'
+```
+
+**⚠️ Multiple environments (dev/staging/prod)**: the three stages this template defines - `terraform_init_plan`, `terraform_approval`, `terraform_apply` - have **fixed names**, not parameterized per environment. Calling the template more than once in the *same* pipeline file fails at compile time with a duplicate-stage-name error. Until the template supports a stage-name prefix/suffix parameter, use **one pipeline YAML file per environment** instead, each with its own trigger/path filter and its own call to this template:
+
+```yaml
+# azure-pipelines-dev.yml
+stages:
+  - template: templates/ado-terraform-pipeline.yaml@templates
+    parameters:
+      terraformWorkingDirectory: '$(Build.SourcesDirectory)/infra/dev'
+      ResourceGroupName: 'tfstate-rg'
+      StorageAccountName: 'tfstateacct001'
+      ContainerName: 'tfstate'
+      Key: 'myproject/dev/terraform.tfstate'
+      environment: 'Dev-Terraform-Approval'
+      # ...terraformVersion, goVersion, smurfVersion, agentPool, ServiceArm as above
+```
+
+```yaml
+# azure-pipelines-prod.yml
+stages:
+  - template: templates/ado-terraform-pipeline.yaml@templates
+    parameters:
+      terraformWorkingDirectory: '$(Build.SourcesDirectory)/infra/prod'
+      ResourceGroupName: 'tfstate-rg'
+      StorageAccountName: 'tfstateacct001'
+      ContainerName: 'tfstate'
+      Key: 'myproject/prod/terraform.tfstate'
+      environment: 'Prod-Terraform-Approval'
+      # ...terraformVersion, goVersion, smurfVersion, agentPool, ServiceArm as above
+```
 
 ---
 
