@@ -34,7 +34,7 @@ A single Azure Pipelines step template covering secret scanning, SAST, dependenc
 |---|---|---|
 | Azure Pipelines agent with internet egress | All scans | Trivy, Semgrep, and the Helm chart repo are fetched at runtime; no pre-baked image required |
 | Docker Registry service connection | `dockerBuildPush`, `imageScan` | Passed as `containerRegistryServiceConnection` |
-| A `containerRegistryServiceConnection` / `registryLoginServer` / `imageRepository` variable group | `dockerBuildPush`, `imageScan` | `registryLoginServer` must be the full FQDN (e.g. `myregistry.azurecr.io`), not the bare registry name - the template validates this and fails fast with a clear error if it looks wrong |
+| `containerRegistryServiceConnection` / `imageRepository` / `registryLoginServer` passed explicitly as template parameters | `dockerBuildPush`, `imageScan` | **All three are plain parameters with no default that falls back to a same-named pipeline variable** - pass a literal value or your own `$(variable)` reference. `registryLoginServer` must be the full FQDN (e.g. `myregistry.azurecr.io`), not the bare registry name - the template validates this and fails fast with a clear error if it looks wrong |
 | A `Dockerfile` at the path passed to `dockerfilePath` | `dockerBuildPush`, `imageScan`, `iacScan` | |
 | A Node.js app directory with `npm run test:coverage` producing `test-results.xml` (JUnit) and `coverage/cobertura-coverage.xml` | `testCoverage` | See the sample app in [`clouddrove-sandbox/az-template`](https://dev.azure.com/clouddrove-sandbox/az-template) for a reference implementation |
 | Override values files at `helmOverridesDir`: `values.yaml` + one `values-<env>.yaml` per entry in `helmEnvironments` | `helmValidate` | **Required no matter what `chartSource` is** - see [`helmOverridesDir` vs `chartSource`](#helmoverridesdir-vs-chartsource) below, this is the single most common setup mistake |
@@ -51,6 +51,8 @@ Error: open /path/to/your/repo/helm/k8s/values.yaml: no such file or directory
 - **`helmOverridesDir`** says where the **override *values* files** live - `values.yaml` plus one `values-<env>.yaml` per entry in `helmEnvironments`. These are layered on top of the chart with `-f` **regardless of where the chart itself came from**. There is no `chartSource` setting that makes this optional.
 
 In other words: even a chart pulled from a public repo needs override values from `helmOverridesDir`, and even a local chart still needs a *separate* `helmOverridesDir` - it does not automatically use the chart's own `values.yaml`.
+
+Everything above describes `helmValuesMode: 'convention'` (the default). If your override files don't follow the `values.yaml`/`values-<env>.yaml` naming - e.g. `k8s/dev.yaml`, `k8s/prod.yaml` - set `helmValuesMode: 'explicit'` and list them in `helmValuesFiles` instead; `helmEnvironments`/`helmOverridesDir` are ignored in that mode. See the [Custom Helm values filenames](#-usage) usage example.
 
 If `helmEnvironments: ['dev', 'stage', 'prod']`, the filenames must match **exactly** - `values-stage.yaml`, not `values-staging.yaml`.
 
@@ -90,7 +92,7 @@ parameters:
 
 ### 🚀 Usage
 
-**✅ Minimal** - everything enabled with defaults:
+**✅ Minimal** - everything enabled with defaults, registry parameters passed explicitly (they have no fallback):
 
 ```yaml
 resources:
@@ -101,11 +103,31 @@ resources:
       ref: refs/tags/v1.0.0
       endpoint: <github-service-connection-name>
 
+steps:
+  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      containerRegistryServiceConnection: 'my-acr-connection'
+      imageRepository: 'my-app'
+      registryLoginServer: 'myregistry.azurecr.io'
+```
+
+You can reference your own pipeline variables instead of literals if you prefer - that's your choice as the caller, not something the template requires:
+
+```yaml
 variables:
-  - group: acr-common   # containerRegistryServiceConnection, registryLoginServer, imageRepository
+  - name: containerRegistryServiceConnection
+    value: 'my-acr-connection'
+  - name: imageRepository
+    value: 'my-app'
+  - name: registryLoginServer
+    value: 'myregistry.azurecr.io'
 
 steps:
   - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      containerRegistryServiceConnection: '$(containerRegistryServiceConnection)'
+      imageRepository: '$(imageRepository)'
+      registryLoginServer: '$(registryLoginServer)'
 ```
 
 **🎯 Selective** - only run a subset of checks, with a couple of paths overridden:
@@ -119,6 +141,9 @@ steps:
       dependencyScan: true
       testCoverage: false        # no test suite in this repo yet
       dockerBuildPush: true
+      containerRegistryServiceConnection: 'my-acr-connection'
+      imageRepository: 'my-app'
+      registryLoginServer: 'myregistry.azurecr.io'
       imageScan: true            # only takes effect when dockerBuildPush is true
       iacScan: true
       helmValidate: false        # this app isn't deployed via Helm
@@ -132,6 +157,7 @@ steps:
 steps:
   - template: templates/ado-build-devsecops-pipeline.yaml@templates
     parameters:
+      dockerBuildPush: false   # this example is Helm-focused; add registry parameters if you also build/push
       chartSource: 'local'
       localChartPath: '$(Build.SourcesDirectory)/helm/my-app'      # Chart.yaml + templates/ live here
       helmOverridesDir: '$(Build.SourcesDirectory)/helm/overrides' # values.yaml + values-<env>.yaml live here - not the same folder
@@ -160,6 +186,9 @@ steps:
     parameters:
       scanPath: '$(Build.SourcesDirectory)/services/api'
       appDir: '$(Build.SourcesDirectory)/services/api'
+      containerRegistryServiceConnection: 'my-acr-connection'
+      imageRepository: 'my-api'
+      registryLoginServer: 'myregistry.azurecr.io'
       dockerfilePath: '$(Build.SourcesDirectory)/services/api/Dockerfile'
       buildContext: '$(Build.SourcesDirectory)/services/api'
       iacScanPath: '$(Build.SourcesDirectory)/services/api/Dockerfile'
@@ -172,17 +201,36 @@ steps:
 steps:
   - template: templates/ado-build-devsecops-pipeline.yaml@templates
     parameters:
-      helmEnvironments: ['dev', 'prod']   # no staging for this app
-      scanSeverity: 'CRITICAL'            # HIGH findings are reported but won't fail the build
-      kubeVersion: '1.28.0'               # match the actual AKS version this app targets
+      dockerBuildPush: false               # this example is Helm-focused
+      helmEnvironments: ['dev', 'prod']    # no staging for this app
+      scanSeverity: 'CRITICAL'             # HIGH findings are reported but won't fail the build
+      kubeVersion: '1.28.0'                # match the actual AKS version this app targets
 ```
 
-**🚫 No artifact publish** - validate the Helm overrides, but don't stage/publish anything for a Release pipeline:
+**📝 Custom Helm values filenames** - your override files don't follow the `values.yaml` / `values-<env>.yaml` convention (e.g. `k8s/dev.yaml`, `k8s/prod.yaml`):
 
 ```yaml
 steps:
   - template: templates/ado-build-devsecops-pipeline.yaml@templates
     parameters:
+      dockerBuildPush: false
+      helmValuesMode: 'explicit'
+      helmValuesFiles:
+        - name: 'dev'
+          path: '$(Build.SourcesDirectory)/k8s/dev.yaml'
+        - name: 'prod'
+          path: '$(Build.SourcesDirectory)/k8s/prod.yaml'
+```
+
+`helmEnvironments` and `helmOverridesDir` are ignored in this mode - `helmValuesFiles` is the complete list of what gets validated, one lint/render/scan pass per entry. There's no separate base file here; each entry's `path` is the only `-f` passed for that entry.
+
+**🚫 No artifact publish** - validate the Helm overrides, but don't stage/publish anything for a Release pipeline. Independent of `helmValidate` - you can publish without validating, or validate without publishing:
+
+```yaml
+steps:
+  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      dockerBuildPush: false
       publishHelmArtifact: false
 ```
 
@@ -227,18 +275,23 @@ steps:
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `containerRegistryServiceConnection` | string | `$(containerRegistryServiceConnection)` | Docker Registry service connection name |
-| `imageRepository` | string | `$(imageRepository)` | Repository name within the registry |
+| `containerRegistryServiceConnection` | string | `''` | Docker Registry service connection name - **no fallback, pass explicitly** |
+| `imageRepository` | string | `''` | Repository name within the registry - **no fallback, pass explicitly** |
+| `registryLoginServer` | string | `''` | Full registry FQDN, e.g. `myregistry.azurecr.io` - **no fallback, pass explicitly**. Used by `imageScan` to build the exact image reference that was just pushed |
 | `dockerfilePath` | string | `$(Build.SourcesDirectory)/Dockerfile` | Dockerfile to build |
 | `buildContext` | string | `$(Build.SourcesDirectory)` | Docker build context |
-| `imageTag` | string | `$(Build.SourceVersion)` | Tag applied to the built image |
+| `imageTag` | string | `$(Build.SourceVersion)` | Tag applied to the built image, and the same tag `imageScan` scans - no mismatch even if you override this |
+
+`containerRegistryServiceConnection`, `imageRepository`, and `registryLoginServer` are validated in a dedicated step whenever `dockerBuildPush` is `true`, regardless of how you supply them (literal value or your own `$(variable)` reference).
 
 #### 🚢 Helm validation
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `helmEnvironments` | object | `['dev', 'staging', 'prod']` | One lint/render/scan pass runs per entry |
-| `helmOverridesDir` | string | `$(Build.SourcesDirectory)/helm/overrides` | Directory containing `values.yaml` + `values-<env>.yaml` |
+| `helmValuesMode` | string | `convention` | `convention` (default): use `helmEnvironments` + `helmOverridesDir`. `explicit`: use `helmValuesFiles` instead - for override files that don't follow the `values.yaml`/`values-<env>.yaml` naming or location |
+| `helmEnvironments` | object | `['dev', 'staging', 'prod']` | Used when `helmValuesMode` is `convention`. One lint/render/scan pass runs per entry |
+| `helmOverridesDir` | string | `$(Build.SourcesDirectory)/helm/overrides` | Used when `helmValuesMode` is `convention`. Directory containing `values.yaml` (optional) + `values-<env>.yaml` (required) per entry in `helmEnvironments` |
+| `helmValuesFiles` | object | `[]` | Used when `helmValuesMode` is `explicit`: a list of `{ name, path }` entries, one lint/render/scan pass per entry, using only that entry's `path` (no base file) |
 | `chartSource` | string | `repo` | `repo` (default): pull `chartName`@`chartVersion` from `chartRepoUrl`. `local`: skip repo add/pull entirely and lint/render `localChartPath` as-is |
 | `chartRepoUrl` | string | `https://charts.clouddrove.com/` | Helm repository added at scan time; ignored when `chartSource` is `local` |
 | `chartRepoAlias` | string | `clouddrove` | Local alias for the added repo; ignored when `chartSource` is `local` |
@@ -247,7 +300,7 @@ steps:
 | `localChartPath` | string | `$(Build.SourcesDirectory)/helm/chart` | Path to a chart already committed in the consumer's repo; only used when `chartSource` is `local` |
 | `helmLintStrict` | boolean | `true` | Adds `--strict` to `helm lint`, failing on warnings too, not just errors |
 | `kubeVersion` | string | `1.29.0` | Passed to `helm template --kube-version`, to catch API-version-specific issues |
-| `publishHelmArtifact` | boolean | `true` | Publish `helmArtifactSourceDir` as a pipeline artifact; only takes effect when `helmValidate` is also `true` |
+| `publishHelmArtifact` | boolean | `true` | Publish `helmArtifactSourceDir` as a pipeline artifact. **Independent of `helmValidate`** - each can be `true`/`false` regardless of the other |
 | `helmArtifactSourceDir` | string | `$(Build.SourcesDirectory)/helm` | Folder staged into the artifact |
 | `helmArtifactTargetSubfolder` | string | `helmchart` | Subfolder name within the staged artifact |
 | `helmArtifactName` | string | `drop` | Name of the published pipeline artifact |
@@ -256,5 +309,5 @@ steps:
 
 - 🧾 All scan steps publish JUnit results to `$(Common.TestResultsDirectory)`, consolidated into a single **Security Scans** test run via `PublishTestResults@2` at the end of the template.
 - 📊 `testCoverage` additionally publishes a **Unit Tests** run and a Cobertura code coverage summary.
-- 📦 `publishHelmArtifact` publishes `helmArtifactSourceDir` (the `helm/` folder, overrides included) as a pipeline artifact named `helmArtifactName` - a downstream Release pipeline can download it and run `helm upgrade --install` against those exact override values.
+- 📦 `publishHelmArtifact` publishes `helmArtifactSourceDir` (the `helm/` folder, overrides included) as a pipeline artifact named `helmArtifactName` - a downstream Release pipeline can download it and run `helm upgrade --install` against those exact override values. Runs independently of `helmValidate` - you can publish without validating, or validate without publishing.
 - 🚫 Nothing in this template deploys or pushes a Helm chart - `helmValidate` only lints/renders/scans; wiring an actual `helm upgrade --install` is left to the consumer's release process.
