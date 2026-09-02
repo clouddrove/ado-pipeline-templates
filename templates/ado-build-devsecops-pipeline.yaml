@@ -146,9 +146,9 @@ steps:
           script: |
             set -e
             # Assign parameters to named bash variables first, then check those -
-            # never ${{ parameters.x:?msg }} directly: an empty parameter value
-            # substitutes to nothing, leaving invalid bash syntax (a colon with no
-            # variable name before it) instead of a clean error.
+            # never interpolate a parameter directly inside a bash ":?" check: an
+            # empty parameter value substitutes to nothing, leaving invalid bash
+            # syntax (a colon with no variable name before it) instead of a clean error.
             CONTAINER_REGISTRY_SERVICE_CONNECTION="${{ parameters.containerRegistryServiceConnection }}"
             IMAGE_REPOSITORY="${{ parameters.imageRepository }}"
             REGISTRY_LOGIN_SERVER="${{ parameters.registryLoginServer }}"
