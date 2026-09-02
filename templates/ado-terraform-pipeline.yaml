@@ -43,6 +43,20 @@ parameters:
     type: string
     default: ''
 
+  # ---- security scanning (same tool/pattern as ado-build-devsecops-pipeline.yaml) ----
+  - name: secretsScan
+    type: boolean
+    default: true
+  - name: iacScan
+    type: boolean
+    default: true
+  - name: scanSeverity
+    type: string
+    default: 'CRITICAL,HIGH'
+  - name: scanExitCode
+    type: string
+    default: '1'
+
 stages:
   - stage: terraform_init_plan
     displayName: Terraform Init and Plan
@@ -53,6 +67,71 @@ stages:
         displayName: Terraform Init, Validate and Plan
         steps:
           - checkout: self
+
+          - ${{ if eq(parameters.secretsScan, true) }}:
+              - task: Bash@3
+                displayName: 'Trivy: Secrets Scan'
+                inputs:
+                  targetType: 'inline'
+                  script: |
+                    set -e
+                    if ! command -v trivy &> /dev/null; then
+                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+                    fi
+                    JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+                    if [ ! -f "$JUNIT_TPL" ]; then
+                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+                    fi
+                    mkdir -p "$(Common.TestResultsDirectory)"
+
+                    REPORT="$(Agent.TempDirectory)/trivy-secrets-report.json"
+                    trivy fs --scanners secret --format json --output "$REPORT" "${{ parameters.terraformWorkingDirectory }}"
+
+                    trivy convert --format table "$REPORT"
+                    trivy convert --format template --template "@$JUNIT_TPL" \
+                      --output "$(Common.TestResultsDirectory)/TEST-trivy-secrets-scan.xml" "$REPORT"
+
+                    trivy convert --format json --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
+
+          - ${{ if eq(parameters.iacScan, true) }}:
+              - task: Bash@3
+                displayName: 'Trivy: Terraform IaC Scan'
+                inputs:
+                  targetType: 'inline'
+                  script: |
+                    set -e
+                    if ! command -v trivy &> /dev/null; then
+                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+                    fi
+                    JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+                    if [ ! -f "$JUNIT_TPL" ]; then
+                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+                    fi
+                    mkdir -p "$(Common.TestResultsDirectory)"
+
+                    REPORT="$(Agent.TempDirectory)/trivy-terraform-iac-report.json"
+                    trivy config --include-non-failures --format json --output "$REPORT" "${{ parameters.terraformWorkingDirectory }}"
+
+                    trivy convert --format table --severity ${{ parameters.scanSeverity }} "$REPORT"
+                    # Not severity-filtering this conversion: trivy convert --severity drops
+                    # individual Misconfigurations entries (even passing ones) rather than
+                    # keeping the matched subset. Full detail goes to the report; the gate
+                    # below stays severity-scoped.
+                    trivy convert --format template --template "@$JUNIT_TPL" \
+                      --output "$(Common.TestResultsDirectory)/TEST-trivy-terraform-iac-scan.xml" "$REPORT"
+
+                    trivy convert --format json --severity ${{ parameters.scanSeverity }} --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
+
+          - task: PublishTestResults@2
+            displayName: 'Publish Security Scan Results'
+            condition: always()
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: 'TEST-*.xml'
+              searchFolder: '$(Common.TestResultsDirectory)'
+              testRunTitle: 'Security Scans'
+              mergeTestResults: true
+              failTaskOnFailedTests: false
 
           - task: TerraformInstaller@1
             displayName: Install Terraform

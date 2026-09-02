@@ -69,7 +69,7 @@ This repository is a central place to define an Azure Pipelines template once an
 | Template | Type | Purpose | Docs |
 |---|---|---|---|
 | `templates/ado-build-devsecops-pipeline.yaml` | Step | Secret/SAST/dependency/image/IaC scanning, unit tests + coverage, Docker build/push, and multi-environment Helm chart validation - each concern independently toggleable | [ado-build-devsecops-pipeline.md](./docs/ado-build-devsecops-pipeline.md) |
-| `templates/ado-terraform-pipeline.yaml` | Stage | Init/validate/plan → manual approval → apply, using [`smurf`](https://github.com/clouddrove/smurf) and OIDC/workload-identity auth to Azure | [ado-terraform-pipeline.md](./docs/ado-terraform-pipeline.md) |
+| `templates/ado-terraform-pipeline.yaml` | Stage | Secret + IaC scanning → init/validate/plan → manual approval → apply, using [`smurf`](https://github.com/clouddrove/smurf) and OIDC/workload-identity auth to Azure | [ado-terraform-pipeline.md](./docs/ado-terraform-pipeline.md) |
 
 This table lists only what exists today. Planned templates are tracked in [🔮 Roadmap](#-roadmap), not listed here until they're real.
 
