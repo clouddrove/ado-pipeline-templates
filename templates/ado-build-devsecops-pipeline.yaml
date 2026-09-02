@@ -77,6 +77,11 @@ parameters:
   - name: helmOverridesDir
     type: string
     default: '$(Build.SourcesDirectory)/helm/overrides'
+  - name: chartSource
+    type: string
+    default: 'repo'    # 'repo' (default): pull chartName@chartVersion from chartRepoUrl.
+                        # 'local': skip repo add/pull entirely and lint/render localChartPath as-is -
+                        # for consumers who commit their own chart instead of publishing one.
   - name: chartRepoUrl
     type: string
     default: 'https://charts.clouddrove.com/'
@@ -89,6 +94,9 @@ parameters:
   - name: chartVersion
     type: string
     default: '1.4.0'
+  - name: localChartPath
+    type: string
+    default: '$(Build.SourcesDirectory)/helm/chart'   # only used when chartSource is 'local'
   - name: helmLintStrict
     type: boolean
     default: true       # `helm lint --strict` fails on warnings too, not just errors
@@ -333,12 +341,18 @@ steps:
               targetType: 'inline'
               script: |
                 set -e
-                helm repo add ${{ parameters.chartRepoAlias }} ${{ parameters.chartRepoUrl }} --force-update
-                helm repo update ${{ parameters.chartRepoAlias }}
-
                 WORKDIR=$(mktemp -d)
-                helm pull ${{ parameters.chartRepoAlias }}/${{ parameters.chartName }} \
-                  --version ${{ parameters.chartVersion }} --untar --untardir "$WORKDIR"
+
+                if [ "${{ parameters.chartSource }}" = "local" ]; then
+                  CHART_DIR="${{ parameters.localChartPath }}"
+                else
+                  helm repo add ${{ parameters.chartRepoAlias }} ${{ parameters.chartRepoUrl }} --force-update
+                  helm repo update ${{ parameters.chartRepoAlias }}
+
+                  helm pull ${{ parameters.chartRepoAlias }}/${{ parameters.chartName }} \
+                    --version ${{ parameters.chartVersion }} --untar --untardir "$WORKDIR"
+                  CHART_DIR="$WORKDIR/${{ parameters.chartName }}"
+                fi
 
                 VALUES_ARGS="-f ${{ parameters.helmOverridesDir }}/values.yaml -f ${{ parameters.helmOverridesDir }}/values-${{ envName }}.yaml"
 
@@ -347,11 +361,11 @@ steps:
                   LINT_FLAGS="--strict"
                 fi
 
-                helm lint "$WORKDIR/${{ parameters.chartName }}" $VALUES_ARGS \
+                helm lint "$CHART_DIR" $VALUES_ARGS \
                   --set image.repository=placeholder.azurecr.io/placeholder \
                   $LINT_FLAGS
 
-                helm template release-test "$WORKDIR/${{ parameters.chartName }}" $VALUES_ARGS \
+                helm template release-test "$CHART_DIR" $VALUES_ARGS \
                   --set image.repository=placeholder.azurecr.io/placeholder \
                   --kube-version ${{ parameters.kubeVersion }} \
                   --skip-tests \
@@ -397,7 +411,4 @@ steps:
       testResultsFiles: 'TEST-*.xml'
       searchFolder: '$(Common.TestResultsDirectory)'
       testRunTitle: 'Security Scans'
-      mergeTestResults: true   # without this, each matched XML becomes its own run,
-                                # all sharing the same title - numbered 1, 2, 3... with
-                                # no way to tell which scan is which
       failTaskOnFailedTests: false

@@ -76,6 +76,16 @@ steps:
       appDir: '$(Build.SourcesDirectory)/src'
 ```
 
+**📁 Local chart** - the chart lives in this repo instead of a Helm chart repository:
+
+```yaml
+steps:
+  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      chartSource: 'local'
+      localChartPath: '$(Build.SourcesDirectory)/helm/my-app'
+```
+
 ---
 
 ## Reference
@@ -129,10 +139,12 @@ steps:
 |---|---|---|---|
 | `helmEnvironments` | object | `['dev', 'staging', 'prod']` | One lint/render/scan pass runs per entry |
 | `helmOverridesDir` | string | `$(Build.SourcesDirectory)/helm/overrides` | Directory containing `values.yaml` + `values-<env>.yaml` |
-| `chartRepoUrl` | string | `https://charts.clouddrove.com/` | Helm repository added at scan time |
-| `chartRepoAlias` | string | `clouddrove` | Local alias for the added repo |
-| `chartName` | string | `helmchart` | Chart name within the repo |
-| `chartVersion` | string | `1.4.0` | Chart version to pull |
+| `chartSource` | string | `repo` | `repo` (default): pull `chartName`@`chartVersion` from `chartRepoUrl`. `local`: skip repo add/pull entirely and lint/render `localChartPath` as-is |
+| `chartRepoUrl` | string | `https://charts.clouddrove.com/` | Helm repository added at scan time; ignored when `chartSource` is `local` |
+| `chartRepoAlias` | string | `clouddrove` | Local alias for the added repo; ignored when `chartSource` is `local` |
+| `chartName` | string | `helmchart` | Chart name within the repo; ignored when `chartSource` is `local` |
+| `chartVersion` | string | `1.4.0` | Chart version to pull; ignored when `chartSource` is `local` |
+| `localChartPath` | string | `$(Build.SourcesDirectory)/helm/chart` | Path to a chart already committed in the consumer's repo; only used when `chartSource` is `local` |
 | `helmLintStrict` | boolean | `true` | Adds `--strict` to `helm lint`, failing on warnings too, not just errors |
 | `kubeVersion` | string | `1.29.0` | Passed to `helm template --kube-version`, to catch API-version-specific issues |
 | `publishHelmArtifact` | boolean | `true` | Publish `helmArtifactSourceDir` as a pipeline artifact; only takes effect when `helmValidate` is also `true` |
