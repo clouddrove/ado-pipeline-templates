@@ -1,0 +1,532 @@
+parameters:
+  # ---- toggles: turn each concern on/off ----
+  - name: secretsScan
+    type: boolean
+    default: true
+  - name: sastScan
+    type: boolean
+    default: true
+  - name: dependencyScan
+    type: boolean
+    default: true
+  - name: testCoverage
+    type: boolean
+    default: true
+  - name: dockerBuildPush
+    type: boolean
+    default: true
+  - name: imageScan
+    type: boolean
+    default: true      # only takes effect when dockerBuildPush is also true
+  - name: iacScan
+    type: boolean
+    default: true
+  - name: helmValidate
+    type: boolean
+    default: true
+
+  # ---- shared scan config ----
+  - name: scanPath
+    type: string
+    default: '$(Build.SourcesDirectory)'
+  - name: scanSeverity
+    type: string
+    default: 'CRITICAL,HIGH'
+  - name: scanExitCode
+    type: string
+    default: '1'
+  - name: scanContinueOnError
+    type: boolean
+    default: false  # true: a failing scan step still shows as failed (findings stay
+                     # visible), but doesn't block later steps from running - the overall
+                     # run shows as "succeeded with issues" instead of "failed". Orthogonal
+                     # to scanExitCode: that controls whether a scan fails at all; this
+                     # controls whether a failure blocks the rest of the pipeline.
+  - name: sastRuleset
+    type: string
+    default: 'p/security-audit'
+  - name: sastSeverity
+    type: string
+    default: 'ERROR'
+  - name: iacScanPath
+    type: string
+    default: '$(Build.SourcesDirectory)/Dockerfile'
+
+  # ---- test coverage config ----
+  - name: appDir
+    type: string
+    default: '$(Build.SourcesDirectory)/app'
+  - name: nodeVersion
+    type: string
+    default: '20.x'
+
+  # ---- docker build/push config ----
+  # containerRegistryServiceConnection / imageRepository / registryLoginServer have no
+  # default that silently falls back to a same-named pipeline variable - pass them
+  # explicitly (a literal value or your own $(variable) reference). Only required when
+  # dockerBuildPush or imageScan is true; validated by the step below either way.
+  - name: containerRegistryServiceConnection
+    type: string
+    default: ''
+  - name: imageRepository
+    type: string
+    default: ''
+  - name: registryLoginServer
+    type: string
+    default: ''
+  - name: dockerfilePath
+    type: string
+    default: '$(Build.SourcesDirectory)/Dockerfile'
+  - name: buildContext
+    type: string
+    default: '$(Build.SourcesDirectory)'
+  - name: imageTag
+    type: string
+    default: '$(Build.SourceVersion)'
+
+  # ---- helm validate config ----
+  - name: helmValuesMode
+    type: string
+    default: 'convention'  # 'convention' (default): use helmEnvironments + helmOverridesDir,
+                            # expecting values.yaml (optional) + values-<env>.yaml (required)
+                            # per environment. 'explicit': use helmValuesFiles instead, for
+                            # value files that don't follow that naming/location convention.
+  - name: helmEnvironments
+    type: object
+    default: ['dev', 'staging', 'prod']    # used when helmValuesMode is 'convention'
+  - name: helmOverridesDir
+    type: string
+    default: '$(Build.SourcesDirectory)/helm/overrides'    # used when helmValuesMode is 'convention'
+  - name: helmValuesFiles
+    type: object
+    default: []   # used when helmValuesMode is 'explicit', e.g.:
+                   # [{ name: 'dev', path: '$(Build.SourcesDirectory)/k8s/dev.yaml' },
+                   #  { name: 'prod', path: '$(Build.SourcesDirectory)/k8s/prod.yaml' }]
+                   # No separate base file in this mode - list every file each entry needs.
+  - name: chartSource
+    type: string
+    default: 'repo'    # 'repo' (default): pull chartName@chartVersion from chartRepoUrl.
+                        # 'local': skip repo add/pull entirely and lint/render localChartPath as-is -
+                        # for consumers who commit their own chart instead of publishing one.
+  - name: chartRepoUrl
+    type: string
+    default: 'https://charts.clouddrove.com/'
+  - name: chartRepoAlias
+    type: string
+    default: 'clouddrove'
+  - name: chartName
+    type: string
+    default: 'helmchart'
+  - name: chartVersion
+    type: string
+    default: '1.4.0'
+  - name: localChartPath
+    type: string
+    default: '$(Build.SourcesDirectory)/helm/chart'   # only used when chartSource is 'local'
+  - name: helmLintStrict
+    type: boolean
+    default: true       # `helm lint --strict` fails on warnings too, not just errors
+  - name: kubeVersion
+    type: string
+    default: '1.29.0'   # passed to `helm template --kube-version` to catch API-version-specific issues
+
+  # ---- helm chart artifact (for a downstream Release pipeline) ----
+  - name: publishHelmArtifact
+    type: boolean
+    default: true       # independent of helmValidate - publishes regardless of whether validation ran
+  - name: helmArtifactSourceDir
+    type: string
+    default: '$(Build.SourcesDirectory)/helm'
+  - name: helmArtifactTargetSubfolder
+    type: string
+    default: 'helmchart'
+  - name: helmArtifactName
+    type: string
+    default: 'drop'
+
+steps:
+  - ${{ if eq(parameters.dockerBuildPush, true) }}:
+      - task: Bash@3
+        displayName: 'Validate required parameters'
+        inputs:
+          targetType: 'inline'
+          script: |
+            set -e
+            # Assign parameters to named bash variables first, then check those -
+            # never interpolate a parameter directly inside a bash ":?" check: an
+            # empty parameter value substitutes to nothing, leaving invalid bash
+            # syntax (a colon with no variable name before it) instead of a clean error.
+            CONTAINER_REGISTRY_SERVICE_CONNECTION="${{ parameters.containerRegistryServiceConnection }}"
+            IMAGE_REPOSITORY="${{ parameters.imageRepository }}"
+            REGISTRY_LOGIN_SERVER="${{ parameters.registryLoginServer }}"
+
+            : "${CONTAINER_REGISTRY_SERVICE_CONNECTION:?containerRegistryServiceConnection parameter is missing or empty}"
+            : "${IMAGE_REPOSITORY:?imageRepository parameter is missing or empty}"
+            : "${REGISTRY_LOGIN_SERVER:?registryLoginServer parameter is missing or empty}"
+
+            case "$REGISTRY_LOGIN_SERVER" in
+              *.*) ;;
+              *)
+                echo "##[error]registryLoginServer='$REGISTRY_LOGIN_SERVER' looks like a bare ACR name, not a login server (expected e.g. '<name>.azurecr.io')."
+                exit 1
+                ;;
+            esac
+            echo "Required parameters OK"
+
+  - ${{ if eq(parameters.secretsScan, true) }}:
+      - task: Bash@3
+        displayName: 'Trivy: Secrets Scan'
+        continueOnError: ${{ parameters.scanContinueOnError }}
+        inputs:
+          targetType: 'inline'
+          script: |
+            set -e
+            if ! command -v trivy &> /dev/null; then
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+            fi
+            JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+            if [ ! -f "$JUNIT_TPL" ]; then
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+            fi
+            mkdir -p "$(Common.TestResultsDirectory)"
+
+            REPORT="$(Agent.TempDirectory)/trivy-secrets-report.json"
+            trivy fs --scanners secret --format json --output "$REPORT" "${{ parameters.scanPath }}"
+
+            trivy convert --format table "$REPORT"
+            trivy convert --format template --template "@$JUNIT_TPL" \
+              --output "$(Common.TestResultsDirectory)/TEST-trivy-secrets-scan.xml" "$REPORT"
+
+            trivy convert --format json --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
+
+  - ${{ if eq(parameters.sastScan, true) }}:
+      - task: Bash@3
+        displayName: 'Semgrep: SAST Scan'
+        continueOnError: ${{ parameters.scanContinueOnError }}
+        inputs:
+          targetType: 'inline'
+          script: |
+            set -e
+            python3 -m pip install --quiet --user --break-system-packages semgrep
+            export PATH="$HOME/.local/bin:$PATH"
+            mkdir -p "$(Common.TestResultsDirectory)"
+
+            # scanExitCode '0' means "report findings, don't block the build" - same
+            # convention the Trivy-based scans use. Without this, --error would still
+            # fail the build on any ERROR-severity finding regardless of scanExitCode.
+            ERROR_FLAG="--error"
+            if [ "${{ parameters.scanExitCode }}" = "0" ]; then
+              ERROR_FLAG=""
+            fi
+
+            semgrep scan \
+              --config ${{ parameters.sastRuleset }} \
+              --severity ${{ parameters.sastSeverity }} \
+              $ERROR_FLAG \
+              --junit-xml-output="$(Common.TestResultsDirectory)/TEST-semgrep-sast-scan.xml" \
+              "${{ parameters.scanPath }}"
+
+  - ${{ if eq(parameters.dependencyScan, true) }}:
+      - task: Bash@3
+        displayName: 'Trivy: Dependency / SCA Scan'
+        continueOnError: ${{ parameters.scanContinueOnError }}
+        inputs:
+          targetType: 'inline'
+          script: |
+            set -e
+            if ! command -v trivy &> /dev/null; then
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+            fi
+            JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+            if [ ! -f "$JUNIT_TPL" ]; then
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+            fi
+            mkdir -p "$(Common.TestResultsDirectory)"
+
+            REPORT="$(Agent.TempDirectory)/trivy-deps-report.json"
+            trivy fs --scanners vuln --format json --output "$REPORT" "${{ parameters.scanPath }}"
+
+            trivy convert --format table --severity ${{ parameters.scanSeverity }} "$REPORT"
+            trivy convert --format template --template "@$JUNIT_TPL" --severity ${{ parameters.scanSeverity }} \
+              --output "$(Common.TestResultsDirectory)/TEST-trivy-dependency-scan.xml" "$REPORT"
+
+            trivy convert --format json --severity ${{ parameters.scanSeverity }} --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
+
+  - ${{ if eq(parameters.testCoverage, true) }}:
+      - task: UseNode@1
+        displayName: 'Use Node.js ${{ parameters.nodeVersion }}'
+        inputs:
+          version: ${{ parameters.nodeVersion }}
+
+      - task: Bash@3
+        displayName: 'npm ci'
+        inputs:
+          targetType: 'inline'
+          workingDirectory: ${{ parameters.appDir }}
+          script: |
+            set -e
+            npm ci
+
+      - task: Bash@3
+        displayName: 'Unit Tests + Coverage'
+        inputs:
+          targetType: 'inline'
+          workingDirectory: ${{ parameters.appDir }}
+          script: |
+            set -e
+            npm run test:coverage
+
+      - task: PublishTestResults@2
+        displayName: 'Publish Unit Test Results'
+        condition: always()
+        inputs:
+          testResultsFormat: 'JUnit'
+          testResultsFiles: 'test-results.xml'
+          searchFolder: ${{ parameters.appDir }}
+          testRunTitle: 'Unit Tests'
+          failTaskOnFailedTests: false
+
+      - task: PublishCodeCoverageResults@2
+        displayName: 'Publish Code Coverage'
+        condition: always()
+        inputs:
+          summaryFileLocation: '${{ parameters.appDir }}/coverage/cobertura-coverage.xml'
+
+  - ${{ if eq(parameters.dockerBuildPush, true) }}:
+      - task: Docker@2
+        displayName: 'Docker: build image'
+        inputs:
+          containerRegistry: ${{ parameters.containerRegistryServiceConnection }}
+          repository: ${{ parameters.imageRepository }}
+          command: 'build'
+          Dockerfile: ${{ parameters.dockerfilePath }}
+          buildContext: ${{ parameters.buildContext }}
+          tags: |
+            ${{ parameters.imageTag }}
+
+      - ${{ if eq(parameters.imageScan, true) }}:
+          - task: Bash@3
+            displayName: 'Trivy: Container Image Scan'
+            continueOnError: ${{ parameters.scanContinueOnError }}
+            inputs:
+              targetType: 'inline'
+              script: |
+                set -e
+                # Same parameters used for the actual build/push, so the image scanned is
+                # always the exact image just built - not a different tag (e.g. if the
+                # caller overrides imageTag away from the $(Build.SourceVersion) default).
+                REGISTRY_LOGIN_SERVER="${{ parameters.registryLoginServer }}"
+                IMAGE_REPOSITORY="${{ parameters.imageRepository }}"
+                : "${REGISTRY_LOGIN_SERVER:?registryLoginServer parameter is missing or empty}"
+                : "${IMAGE_REPOSITORY:?imageRepository parameter is missing or empty}"
+                IMAGE_REF="${REGISTRY_LOGIN_SERVER}/${IMAGE_REPOSITORY}:${{ parameters.imageTag }}"
+
+                if ! command -v trivy &> /dev/null; then
+                  curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+                fi
+                JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+                if [ ! -f "$JUNIT_TPL" ]; then
+                  curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+                fi
+                mkdir -p "$(Common.TestResultsDirectory)"
+
+                REPORT="$(Agent.TempDirectory)/trivy-image-report.json"
+                trivy image --format json --output "$REPORT" "$IMAGE_REF"
+
+                trivy convert --format table --severity ${{ parameters.scanSeverity }} "$REPORT"
+                trivy convert --format template --template "@$JUNIT_TPL" --severity ${{ parameters.scanSeverity }} \
+                  --output "$(Common.TestResultsDirectory)/TEST-trivy-image-scan.xml" "$REPORT"
+
+                trivy convert --format json --severity ${{ parameters.scanSeverity }} --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
+
+      - task: Docker@2
+        displayName: 'Docker: push image'
+        inputs:
+          containerRegistry: ${{ parameters.containerRegistryServiceConnection }}
+          repository: ${{ parameters.imageRepository }}
+          command: 'push'
+          tags: |
+            ${{ parameters.imageTag }}
+
+  - ${{ if eq(parameters.iacScan, true) }}:
+      - task: Bash@3
+        displayName: 'Trivy: IaC / Misconfig Scan'
+        continueOnError: ${{ parameters.scanContinueOnError }}
+        inputs:
+          targetType: 'inline'
+          script: |
+            set -e
+            if ! command -v trivy &> /dev/null; then
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+            fi
+            JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+            if [ ! -f "$JUNIT_TPL" ]; then
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+            fi
+            mkdir -p "$(Common.TestResultsDirectory)"
+
+            REPORT="$(Agent.TempDirectory)/trivy-iac-report.json"
+            trivy config --include-non-failures --format json --output "$REPORT" "${{ parameters.iacScanPath }}"
+
+            trivy convert --format table --severity ${{ parameters.scanSeverity }} "$REPORT"
+            # Not severity-filtering this conversion: trivy convert --severity drops
+            # individual Misconfigurations entries (even passing ones) rather than
+            # keeping the matched subset, which would empty out the Tests tab. Full
+            # detail (all checks, pass and fail) goes to the report; the gate below
+            # stays correctly scoped to the requested severity.
+            trivy convert --format template --template "@$JUNIT_TPL" \
+              --output "$(Common.TestResultsDirectory)/TEST-trivy-iac-scan.xml" "$REPORT"
+
+            trivy convert --format json --severity ${{ parameters.scanSeverity }} --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
+
+  - ${{ if eq(parameters.helmValidate, true) }}:
+      - task: HelmInstaller@1
+        displayName: 'Install Helm'
+        inputs:
+          helmVersionToInstall: 'latest'
+
+      - ${{ if eq(parameters.helmValuesMode, 'convention') }}:
+          - ${{ each envName in parameters.helmEnvironments }}:
+              - task: Bash@3
+                displayName: 'Helm Lint/Render/Scan - ${{ envName }}'
+                continueOnError: ${{ parameters.scanContinueOnError }}
+                inputs:
+                  targetType: 'inline'
+                  script: |
+                    set -e
+                    WORKDIR=$(mktemp -d)
+
+                    if [ "${{ parameters.chartSource }}" = "local" ]; then
+                      CHART_DIR="${{ parameters.localChartPath }}"
+                    else
+                      helm repo add ${{ parameters.chartRepoAlias }} ${{ parameters.chartRepoUrl }} --force-update
+                      helm repo update ${{ parameters.chartRepoAlias }}
+
+                      helm pull ${{ parameters.chartRepoAlias }}/${{ parameters.chartName }} \
+                        --version ${{ parameters.chartVersion }} --untar --untardir "$WORKDIR"
+                      CHART_DIR="$WORKDIR/${{ parameters.chartName }}"
+                    fi
+
+                    # Base values.yaml is optional - only some apps have one; the
+                    # per-environment file is always required.
+                    VALUES_ARGS=""
+                    BASE_FILE="${{ parameters.helmOverridesDir }}/values.yaml"
+                    if [ -f "$BASE_FILE" ]; then
+                      VALUES_ARGS="-f $BASE_FILE"
+                    fi
+                    VALUES_ARGS="$VALUES_ARGS -f ${{ parameters.helmOverridesDir }}/values-${{ envName }}.yaml"
+
+                    LINT_FLAGS=""
+                    if [ "$(echo '${{ parameters.helmLintStrict }}' | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                      LINT_FLAGS="--strict"
+                    fi
+
+                    helm lint "$CHART_DIR" $VALUES_ARGS \
+                      --set image.repository=placeholder.azurecr.io/placeholder \
+                      $LINT_FLAGS
+
+                    helm template release-test "$CHART_DIR" $VALUES_ARGS \
+                      --set image.repository=placeholder.azurecr.io/placeholder \
+                      --kube-version ${{ parameters.kubeVersion }} \
+                      --skip-tests \
+                      > "$WORKDIR/rendered-${{ envName }}.yaml"
+
+                    if ! command -v trivy &> /dev/null; then
+                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+                    fi
+                    JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+                    if [ ! -f "$JUNIT_TPL" ]; then
+                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+                    fi
+                    mkdir -p "$(Common.TestResultsDirectory)"
+
+                    REPORT="$(Agent.TempDirectory)/trivy-helm-${{ envName }}-report.json"
+                    trivy config --include-non-failures --format json --output "$REPORT" "$WORKDIR/rendered-${{ envName }}.yaml"
+
+                    trivy convert --format table --severity ${{ parameters.scanSeverity }} "$REPORT"
+                    trivy convert --format template --template "@$JUNIT_TPL" \
+                      --output "$(Common.TestResultsDirectory)/TEST-trivy-helm-${{ envName }}.xml" "$REPORT"
+
+                    trivy convert --format json --severity ${{ parameters.scanSeverity }} --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
+
+      - ${{ if eq(parameters.helmValuesMode, 'explicit') }}:
+          - ${{ each entry in parameters.helmValuesFiles }}:
+              - task: Bash@3
+                displayName: 'Helm Lint/Render/Scan - ${{ entry.name }}'
+                continueOnError: ${{ parameters.scanContinueOnError }}
+                inputs:
+                  targetType: 'inline'
+                  script: |
+                    set -e
+                    WORKDIR=$(mktemp -d)
+
+                    if [ "${{ parameters.chartSource }}" = "local" ]; then
+                      CHART_DIR="${{ parameters.localChartPath }}"
+                    else
+                      helm repo add ${{ parameters.chartRepoAlias }} ${{ parameters.chartRepoUrl }} --force-update
+                      helm repo update ${{ parameters.chartRepoAlias }}
+
+                      helm pull ${{ parameters.chartRepoAlias }}/${{ parameters.chartName }} \
+                        --version ${{ parameters.chartVersion }} --untar --untardir "$WORKDIR"
+                      CHART_DIR="$WORKDIR/${{ parameters.chartName }}"
+                    fi
+
+                    # No base file in explicit mode - each entry names its own file(s).
+                    VALUES_ARGS="-f ${{ entry.path }}"
+
+                    LINT_FLAGS=""
+                    if [ "$(echo '${{ parameters.helmLintStrict }}' | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                      LINT_FLAGS="--strict"
+                    fi
+
+                    helm lint "$CHART_DIR" $VALUES_ARGS \
+                      --set image.repository=placeholder.azurecr.io/placeholder \
+                      $LINT_FLAGS
+
+                    helm template release-test "$CHART_DIR" $VALUES_ARGS \
+                      --set image.repository=placeholder.azurecr.io/placeholder \
+                      --kube-version ${{ parameters.kubeVersion }} \
+                      --skip-tests \
+                      > "$WORKDIR/rendered-${{ entry.name }}.yaml"
+
+                    if ! command -v trivy &> /dev/null; then
+                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+                    fi
+                    JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+                    if [ ! -f "$JUNIT_TPL" ]; then
+                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+                    fi
+                    mkdir -p "$(Common.TestResultsDirectory)"
+
+                    REPORT="$(Agent.TempDirectory)/trivy-helm-${{ entry.name }}-report.json"
+                    trivy config --include-non-failures --format json --output "$REPORT" "$WORKDIR/rendered-${{ entry.name }}.yaml"
+
+                    trivy convert --format table --severity ${{ parameters.scanSeverity }} "$REPORT"
+                    trivy convert --format template --template "@$JUNIT_TPL" \
+                      --output "$(Common.TestResultsDirectory)/TEST-trivy-helm-${{ entry.name }}.xml" "$REPORT"
+
+                    trivy convert --format json --severity ${{ parameters.scanSeverity }} --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
+
+  - ${{ if eq(parameters.publishHelmArtifact, true) }}:
+      - task: CopyFiles@2
+        displayName: 'Stage Chart Artifact'
+        inputs:
+          SourceFolder: '${{ parameters.helmArtifactSourceDir }}'
+          TargetFolder: '$(Build.ArtifactStagingDirectory)/${{ parameters.helmArtifactTargetSubfolder }}'
+
+      - task: PublishPipelineArtifact@1
+        displayName: 'Publish Helm Chart Artifact'
+        inputs:
+          targetPath: '$(Build.ArtifactStagingDirectory)'
+          artifact: '${{ parameters.helmArtifactName }}'
+          publishLocation: 'pipeline'
+
+  - task: PublishTestResults@2
+    displayName: 'Publish Security Scan Results'
+    condition: always()
+    inputs:
+      testResultsFormat: 'JUnit'
+      testResultsFiles: 'TEST-*.xml'
+      searchFolder: '$(Common.TestResultsDirectory)'
+      testRunTitle: 'Security Scans'
+      failTaskOnFailedTests: false
