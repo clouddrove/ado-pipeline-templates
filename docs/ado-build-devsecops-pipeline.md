@@ -234,6 +234,18 @@ steps:
       publishHelmArtifact: false
 ```
 
+**⚠️ Gradual scan rollout** - findings still fail each individual scan step (so they stay visible, not hidden), but a failure doesn't stop the rest of the pipeline from running while scanning is being introduced:
+
+```yaml
+steps:
+  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      scanExitCode: '1'            # keep severity meaningful - don't hide findings
+      scanContinueOnError: true    # ...but don't let a finding block build/push/deploy yet
+```
+
+The run shows as "succeeded with issues" rather than a clean "succeeded" or a hard "failed" - each scan step that found something stays visibly red in the pipeline view and in the Tests tab, but Docker build/push, Helm validation, and everything else still runs. Once teams have worked through the backlog of findings, drop `scanContinueOnError` (or set it back to `false`) to make scanning hard-blocking again.
+
 ---
 
 ## Reference
@@ -259,7 +271,8 @@ steps:
 |---|---|---|---|
 | `scanPath` | string | `$(Build.SourcesDirectory)` | Path scanned by `secretsScan`, `sastScan`, `dependencyScan` |
 | `scanSeverity` | string | `CRITICAL,HIGH` | Severity threshold that fails the build for Trivy-based scans |
-| `scanExitCode` | string | `1` | Exit code Trivy returns when `scanSeverity` findings exist |
+| `scanExitCode` | string | `1` | Exit code Trivy (and Semgrep) return when `scanSeverity` findings exist. Set to `0` to make findings non-blocking *and invisible* - the step shows green even with findings |
+| `scanContinueOnError` | boolean | `false` | `true`: a failing scan step still shows as failed (findings stay visible - not hidden like `scanExitCode: '0'`), but doesn't block later steps; the run shows as "succeeded with issues" instead of "failed". Applies to every scan step: secrets, SAST, dependency, image, IaC, and each Helm lint/render/scan pass |
 | `sastRuleset` | string | `p/security-audit` | Semgrep ruleset |
 | `sastSeverity` | string | `ERROR` | Semgrep severity threshold that fails the build |
 | `iacScanPath` | string | `$(Build.SourcesDirectory)/Dockerfile` | Path scanned by `iacScan` |

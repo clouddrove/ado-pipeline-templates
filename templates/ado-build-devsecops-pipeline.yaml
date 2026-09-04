@@ -35,6 +35,13 @@ parameters:
   - name: scanExitCode
     type: string
     default: '1'
+  - name: scanContinueOnError
+    type: boolean
+    default: false  # true: a failing scan step still shows as failed (findings stay
+                     # visible), but doesn't block later steps from running - the overall
+                     # run shows as "succeeded with issues" instead of "failed". Orthogonal
+                     # to scanExitCode: that controls whether a scan fails at all; this
+                     # controls whether a failure blocks the rest of the pipeline.
   - name: sastRuleset
     type: string
     default: 'p/security-audit'
@@ -169,6 +176,7 @@ steps:
   - ${{ if eq(parameters.secretsScan, true) }}:
       - task: Bash@3
         displayName: 'Trivy: Secrets Scan'
+        continueOnError: ${{ parameters.scanContinueOnError }}
         inputs:
           targetType: 'inline'
           script: |
@@ -194,6 +202,7 @@ steps:
   - ${{ if eq(parameters.sastScan, true) }}:
       - task: Bash@3
         displayName: 'Semgrep: SAST Scan'
+        continueOnError: ${{ parameters.scanContinueOnError }}
         inputs:
           targetType: 'inline'
           script: |
@@ -220,6 +229,7 @@ steps:
   - ${{ if eq(parameters.dependencyScan, true) }}:
       - task: Bash@3
         displayName: 'Trivy: Dependency / SCA Scan'
+        continueOnError: ${{ parameters.scanContinueOnError }}
         inputs:
           targetType: 'inline'
           script: |
@@ -297,6 +307,7 @@ steps:
       - ${{ if eq(parameters.imageScan, true) }}:
           - task: Bash@3
             displayName: 'Trivy: Container Image Scan'
+            continueOnError: ${{ parameters.scanContinueOnError }}
             inputs:
               targetType: 'inline'
               script: |
@@ -340,6 +351,7 @@ steps:
   - ${{ if eq(parameters.iacScan, true) }}:
       - task: Bash@3
         displayName: 'Trivy: IaC / Misconfig Scan'
+        continueOnError: ${{ parameters.scanContinueOnError }}
         inputs:
           targetType: 'inline'
           script: |
@@ -377,6 +389,7 @@ steps:
           - ${{ each envName in parameters.helmEnvironments }}:
               - task: Bash@3
                 displayName: 'Helm Lint/Render/Scan - ${{ envName }}'
+                continueOnError: ${{ parameters.scanContinueOnError }}
                 inputs:
                   targetType: 'inline'
                   script: |
@@ -440,6 +453,7 @@ steps:
           - ${{ each entry in parameters.helmValuesFiles }}:
               - task: Bash@3
                 displayName: 'Helm Lint/Render/Scan - ${{ entry.name }}'
+                continueOnError: ${{ parameters.scanContinueOnError }}
                 inputs:
                   targetType: 'inline'
                   script: |
