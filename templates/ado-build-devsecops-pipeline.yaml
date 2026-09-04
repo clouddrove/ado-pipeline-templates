@@ -574,7 +574,35 @@ steps:
         displayName: 'Stage Chart Artifact'
         inputs:
           SourceFolder: '${{ parameters.helmArtifactSourceDir }}'
+          Contents: '**'
           TargetFolder: '$(Build.ArtifactStagingDirectory)/${{ parameters.helmArtifactTargetSubfolder }}'
+
+      - ${{ if eq(parameters.helmValuesMode, 'explicit') }}:
+          - ${{ each entry in parameters.helmValuesFiles }}:
+              - task: Bash@3
+                displayName: 'Stage values file - ${{ entry.name }}'
+                inputs:
+                  targetType: 'inline'
+                  script: |
+                    set -e
+                    SRC="${{ entry.path }}"
+                    VARS_DIR="$(Build.ArtifactStagingDirectory)/${{ parameters.helmArtifactTargetSubfolder }}/vars"
+                    mkdir -p "$VARS_DIR"
+
+                    if [ ! -f "$SRC" ]; then
+                      echo "##[error]helmValuesFiles entry '${{ entry.name }}' points to '$SRC', which does not exist."
+                      exit 1
+                    fi
+
+                    BASENAME="$(basename "$SRC")"
+                    DEST="$VARS_DIR/$BASENAME"
+
+                    if [ -e "$DEST" ]; then
+                      echo "##[error]Refusing to overwrite '$DEST' - another helmValuesFiles entry, or a file already shipped in the chart's own vars/ directory, already uses the basename '$BASENAME'. Rename the source file so every entry's basename is unique."
+                      exit 1
+                    fi
+
+                    cp "$SRC" "$DEST"
 
       - task: PublishPipelineArtifact@1
         displayName: 'Publish Helm Chart Artifact'
