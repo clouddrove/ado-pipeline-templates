@@ -105,9 +105,13 @@ parameters:
                    # No separate base file in this mode - list every file each entry needs.
   - name: chartSource
     type: string
-    default: 'repo'    # 'repo' (default): pull chartName@chartVersion from chartRepoUrl.
+    default: 'repo'    # 'repo' (default): pull chartName@chartVersion from chartRepoUrl via
+                        # classic `helm repo add`/`helm pull` (index.yaml-based repos only).
                         # 'local': skip repo add/pull entirely and lint/render localChartPath as-is -
                         # for consumers who commit their own chart instead of publishing one.
+                        # 'oci': pull chartName@chartVersion from an OCI registry (e.g. an ACR)
+                        # via `helm pull oci://...` - use this for OCI registries instead of
+                        # 'repo', since OCI has no index.yaml/repo-alias semantics to add a repo to.
   - name: chartRepoUrl
     type: string
     default: 'https://charts.clouddrove.com/'
@@ -123,6 +127,18 @@ parameters:
   - name: localChartPath
     type: string
     default: '$(Build.SourcesDirectory)/helm/chart'   # only used when chartSource is 'local'
+  - name: chartAzureSubscription
+    type: string
+    default: ''   # AzureRM service connection (workload identity federation); required when chartSource is 'oci'
+  - name: chartRegistryName
+    type: string
+    default: ''   # bare ACR name (not the login server), e.g. 'myregistry' - required when chartSource is 'oci'
+  - name: chartRegistryLoginServer
+    type: string
+    default: ''   # e.g. 'myregistry.azurecr.io' - required when chartSource is 'oci'
+  - name: chartRepository
+    type: string
+    default: ''   # repository path within the registry, e.g. 'helm/helmchart' - required when chartSource is 'oci'
   - name: helmLintStrict
     type: boolean
     default: true       # `helm lint --strict` fails on warnings too, not just errors
@@ -385,6 +401,48 @@ steps:
         inputs:
           helmVersionToInstall: 'latest'
 
+      - ${{ if eq(parameters.chartSource, 'oci') }}:
+          - task: AzureCLI@2
+            displayName: 'Pull OCI Helm chart'
+            inputs:
+              azureSubscription: ${{ parameters.chartAzureSubscription }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+
+                ACR_NAME="${{ parameters.chartRegistryName }}"
+                ACR_SERVER="${{ parameters.chartRegistryLoginServer }}"
+                CHART_REPOSITORY="${{ parameters.chartRepository }}"
+                CHART_VERSION="${{ parameters.chartVersion }}"
+                CHART_DIR="$(Agent.TempDirectory)/oci-helm-chart"
+
+                : "${ACR_NAME:?chartRegistryName is required}"
+                : "${ACR_SERVER:?chartRegistryLoginServer is required}"
+                : "${CHART_REPOSITORY:?chartRepository is required}"
+                : "${CHART_VERSION:?chartVersion is required}"
+
+                read -r ACR_TOKEN < <(
+                  az acr login \
+                    --name "$ACR_NAME" \
+                    --expose-token \
+                    --query accessToken \
+                    --output tsv
+                )
+
+                printf '%s' "$ACR_TOKEN" |
+                  helm registry login "$ACR_SERVER" \
+                    --username 00000000-0000-0000-0000-000000000000 \
+                    --password-stdin
+
+                mkdir -p "$CHART_DIR"
+
+                helm pull \
+                  "oci://${ACR_SERVER}/${CHART_REPOSITORY}" \
+                  --version "$CHART_VERSION" \
+                  --untar \
+                  --untardir "$CHART_DIR"
+
       - ${{ if eq(parameters.helmValuesMode, 'convention') }}:
           - ${{ each envName in parameters.helmEnvironments }}:
               - task: Bash@3
@@ -398,6 +456,8 @@ steps:
 
                     if [ "${{ parameters.chartSource }}" = "local" ]; then
                       CHART_DIR="${{ parameters.localChartPath }}"
+                    elif [ "${{ parameters.chartSource }}" = "oci" ]; then
+                      CHART_DIR="$(Agent.TempDirectory)/oci-helm-chart/${{ parameters.chartName }}"
                     else
                       helm repo add ${{ parameters.chartRepoAlias }} ${{ parameters.chartRepoUrl }} --force-update
                       helm repo update ${{ parameters.chartRepoAlias }}
@@ -462,6 +522,8 @@ steps:
 
                     if [ "${{ parameters.chartSource }}" = "local" ]; then
                       CHART_DIR="${{ parameters.localChartPath }}"
+                    elif [ "${{ parameters.chartSource }}" = "oci" ]; then
+                      CHART_DIR="$(Agent.TempDirectory)/oci-helm-chart/${{ parameters.chartName }}"
                     else
                       helm repo add ${{ parameters.chartRepoAlias }} ${{ parameters.chartRepoUrl }} --force-update
                       helm repo update ${{ parameters.chartRepoAlias }}

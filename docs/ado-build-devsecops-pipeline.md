@@ -47,7 +47,7 @@ These are two independent settings, and mixing them up is the #1 cause of `helmV
 Error: open /path/to/your/repo/helm/k8s/values.yaml: no such file or directory
 ```
 
-- **`chartSource`** (+ `chartRepoUrl`/`chartRepoAlias`/`chartName`/`chartVersion`, or `localChartPath`) says **where the chart's `Chart.yaml` and `templates/` come from** - either pulled from a Helm repository (`chartSource: repo`, the default) or a path already in your own repo (`chartSource: local`).
+- **`chartSource`** (+ `chartRepoUrl`/`chartRepoAlias`/`chartName`/`chartVersion`, or `localChartPath`, or `chartAzureSubscription`/`chartRegistryName`/`chartRegistryLoginServer`/`chartRepository`) says **where the chart's `Chart.yaml` and `templates/` come from** - pulled from a classic index.yaml-based Helm repository (`chartSource: repo`, the default), pulled from an OCI registry like an ACR (`chartSource: oci`), or a path already in your own repo (`chartSource: local`).
 - **`helmOverridesDir`** says where the **override *values* files** live - `values.yaml` plus one `values-<env>.yaml` per entry in `helmEnvironments`. These are layered on top of the chart with `-f` **regardless of where the chart itself came from**. There is no `chartSource` setting that makes this optional.
 
 In other words: even a chart pulled from a public repo needs override values from `helmOverridesDir`, and even a local chart still needs a *separate* `helmOverridesDir` - it does not automatically use the chart's own `values.yaml`.
@@ -162,6 +162,24 @@ steps:
       localChartPath: '$(Build.SourcesDirectory)/helm/my-app'      # Chart.yaml + templates/ live here
       helmOverridesDir: '$(Build.SourcesDirectory)/helm/overrides' # values.yaml + values-<env>.yaml live here - not the same folder
 ```
+
+**📦 OCI registry chart** - the chart is published to an OCI registry (e.g. an ACR), not a classic index.yaml-based Helm repository. OCI has no repo-alias/`helm repo add` semantics, so use `chartSource: 'oci'` instead of `'repo'`:
+
+```yaml
+steps:
+  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      dockerBuildPush: false                                   # this example is Helm-focused
+      chartSource: 'oci'
+      chartAzureSubscription: 'my-acr-oidc-connection'         # AzureRM service connection, workload identity federation
+      chartRegistryName: 'myregistry'                          # bare ACR name, not the login server
+      chartRegistryLoginServer: 'myregistry.azurecr.io'
+      chartRepository: 'helm/helmchart'                        # repository path within the registry
+      chartName: 'helmchart'                                   # must match the chart's actual name - used to locate the untarred folder
+      chartVersion: '1.2.2'
+```
+
+The chart is pulled once (via `az acr login --expose-token` + `helm registry login` + `helm pull oci://...`) before the per-environment lint/render/scan loop, not once per environment. `chartAzureSubscription` must be an AzureRM service connection with `AcrPull` (or `Container Registry Repository Reader` if ACR ABAC repository permissions are enabled) on that registry.
 
 **🔎 Scans only** - a PR-validation pipeline that shouldn't build, push, or touch Helm at all:
 
@@ -305,12 +323,16 @@ The run shows as "succeeded with issues" rather than a clean "succeeded" or a ha
 | `helmEnvironments` | object | `['dev', 'staging', 'prod']` | Used when `helmValuesMode` is `convention`. One lint/render/scan pass runs per entry |
 | `helmOverridesDir` | string | `$(Build.SourcesDirectory)/helm/overrides` | Used when `helmValuesMode` is `convention`. Directory containing `values.yaml` (optional) + `values-<env>.yaml` (required) per entry in `helmEnvironments` |
 | `helmValuesFiles` | object | `[]` | Used when `helmValuesMode` is `explicit`: a list of `{ name, path }` entries, one lint/render/scan pass per entry, using only that entry's `path` (no base file) |
-| `chartSource` | string | `repo` | `repo` (default): pull `chartName`@`chartVersion` from `chartRepoUrl`. `local`: skip repo add/pull entirely and lint/render `localChartPath` as-is |
-| `chartRepoUrl` | string | `https://charts.clouddrove.com/` | Helm repository added at scan time; ignored when `chartSource` is `local` |
-| `chartRepoAlias` | string | `clouddrove` | Local alias for the added repo; ignored when `chartSource` is `local` |
-| `chartName` | string | `helmchart` | Chart name within the repo; ignored when `chartSource` is `local` |
+| `chartSource` | string | `repo` | `repo` (default): pull `chartName`@`chartVersion` from `chartRepoUrl` via classic `helm repo add`/`helm pull` (index.yaml-based repos only). `local`: skip repo add/pull entirely and lint/render `localChartPath` as-is. `oci`: pull `chartName`@`chartVersion` from an OCI registry (e.g. an ACR) via `helm pull oci://...` |
+| `chartRepoUrl` | string | `https://charts.clouddrove.com/` | Helm repository added at scan time; ignored unless `chartSource` is `repo` |
+| `chartRepoAlias` | string | `clouddrove` | Local alias for the added repo; ignored unless `chartSource` is `repo` |
+| `chartName` | string | `helmchart` | Chart name; ignored when `chartSource` is `local`. Must match the actual chart name when `chartSource` is `oci`, since it's used to locate the untarred chart folder |
 | `chartVersion` | string | `1.4.0` | Chart version to pull; ignored when `chartSource` is `local` |
 | `localChartPath` | string | `$(Build.SourcesDirectory)/helm/chart` | Path to a chart already committed in the consumer's repo; only used when `chartSource` is `local` |
+| `chartAzureSubscription` | string | `''` | AzureRM service connection (workload identity federation) used to `az acr login`; **required when `chartSource` is `oci`** |
+| `chartRegistryName` | string | `''` | Bare ACR name (not the login server), e.g. `myregistry`; **required when `chartSource` is `oci`** |
+| `chartRegistryLoginServer` | string | `''` | Registry FQDN, e.g. `myregistry.azurecr.io`; **required when `chartSource` is `oci`** |
+| `chartRepository` | string | `''` | Repository path within the registry, e.g. `helm/helmchart`; **required when `chartSource` is `oci`** |
 | `helmLintStrict` | boolean | `true` | Adds `--strict` to `helm lint`, failing on warnings too, not just errors |
 | `kubeVersion` | string | `1.29.0` | Passed to `helm template --kube-version`, to catch API-version-specific issues |
 | `publishHelmArtifact` | boolean | `true` | Publish `helmArtifactSourceDir` as a pipeline artifact. **Independent of `helmValidate`** - each can be `true`/`false` regardless of the other |
