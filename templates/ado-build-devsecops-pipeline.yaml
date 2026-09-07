@@ -83,6 +83,9 @@ parameters:
   - name: imageTag
     type: string
     default: '$(Build.SourceVersion)'
+  - name: dockerBuildArguments
+    type: string
+    default: ''
 
   # ---- helm validate config ----
   - name: helmValuesMode
@@ -317,6 +320,7 @@ steps:
           command: 'build'
           Dockerfile: ${{ parameters.dockerfilePath }}
           buildContext: ${{ parameters.buildContext }}
+          arguments: ${{ parameters.dockerBuildArguments }}
           tags: |
             ${{ parameters.imageTag }}
 
