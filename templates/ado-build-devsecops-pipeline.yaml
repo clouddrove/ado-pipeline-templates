@@ -42,6 +42,12 @@ parameters:
                      # run shows as "succeeded with issues" instead of "failed". Orthogonal
                      # to scanExitCode: that controls whether a scan fails at all; this
                      # controls whether a failure blocks the rest of the pipeline.
+  - name: trivyVersion
+    type: string
+    default: ''     # empty preserves the Trivy install script's default/latest behavior
+  - name: semgrepVersion
+    type: string
+    default: ''     # empty installs the latest semgrep package from pip
   - name: sastRuleset
     type: string
     default: 'p/security-audit'
@@ -145,6 +151,9 @@ parameters:
   - name: helmLintStrict
     type: boolean
     default: true       # `helm lint --strict` fails on warnings too, not just errors
+  - name: helmVersion
+    type: string
+    default: 'latest'
   - name: kubeVersion
     type: string
     default: '1.29.0'   # passed to `helm template --kube-version` to catch API-version-specific issues
@@ -164,13 +173,38 @@ parameters:
     default: 'drop'
 
 steps:
-  - ${{ if eq(parameters.dockerBuildPush, true) }}:
+  - ${{ if or(eq(parameters.secretsScan, true), eq(parameters.dependencyScan, true), eq(parameters.imageScan, true), eq(parameters.iacScan, true), eq(parameters.helmValidate, true)) }}:
       - task: Bash@3
-        displayName: 'Validate required parameters'
+        displayName: 'Setup Trivy'
         inputs:
           targetType: 'inline'
           script: |
-            set -e
+            set -euo pipefail
+
+            if ! command -v trivy &> /dev/null; then
+              TRIVY_VERSION="${{ parameters.trivyVersion }}"
+              if [ -n "$TRIVY_VERSION" ]; then
+                curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin "$TRIVY_VERSION"
+              else
+                curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+              fi
+            fi
+
+            JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+            if [ ! -f "$JUNIT_TPL" ]; then
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+            fi
+
+            mkdir -p "$(Common.TestResultsDirectory)"
+            trivy --version
+
+  - ${{ if eq(parameters.dockerBuildPush, true) }}:
+      - task: Bash@3
+        displayName: 'Validate Docker parameters'
+        inputs:
+          targetType: 'inline'
+          script: |
+            set -euo pipefail
             # Assign parameters to named bash variables first, then check those -
             # never interpolate a parameter directly inside a bash ":?" check: an
             # empty parameter value substitutes to nothing, leaving invalid bash
@@ -178,10 +212,16 @@ steps:
             CONTAINER_REGISTRY_SERVICE_CONNECTION="${{ parameters.containerRegistryServiceConnection }}"
             IMAGE_REPOSITORY="${{ parameters.imageRepository }}"
             REGISTRY_LOGIN_SERVER="${{ parameters.registryLoginServer }}"
+            DOCKERFILE_PATH="${{ parameters.dockerfilePath }}"
+            BUILD_CONTEXT="${{ parameters.buildContext }}"
+            IMAGE_TAG="${{ parameters.imageTag }}"
 
             : "${CONTAINER_REGISTRY_SERVICE_CONNECTION:?containerRegistryServiceConnection parameter is missing or empty}"
             : "${IMAGE_REPOSITORY:?imageRepository parameter is missing or empty}"
             : "${REGISTRY_LOGIN_SERVER:?registryLoginServer parameter is missing or empty}"
+            : "${DOCKERFILE_PATH:?dockerfilePath parameter is missing or empty}"
+            : "${BUILD_CONTEXT:?buildContext parameter is missing or empty}"
+            : "${IMAGE_TAG:?imageTag parameter is missing or empty}"
 
             case "$REGISTRY_LOGIN_SERVER" in
               *.*) ;;
@@ -190,7 +230,106 @@ steps:
                 exit 1
                 ;;
             esac
-            echo "Required parameters OK"
+
+            if [ ! -f "$DOCKERFILE_PATH" ]; then
+              echo "##[error]dockerfilePath '$DOCKERFILE_PATH' does not exist."
+              exit 1
+            fi
+
+            if [ ! -d "$BUILD_CONTEXT" ]; then
+              echo "##[error]buildContext '$BUILD_CONTEXT' does not exist."
+              exit 1
+            fi
+
+            echo "Docker parameters OK"
+
+  - ${{ if eq(parameters.helmValidate, true) }}:
+      - task: Bash@3
+        displayName: 'Validate Helm parameters'
+        inputs:
+          targetType: 'inline'
+          script: |
+            set -euo pipefail
+
+            HELM_VALUES_MODE="${{ parameters.helmValuesMode }}"
+            CHART_SOURCE="${{ parameters.chartSource }}"
+            CHART_REPO_URL="${{ parameters.chartRepoUrl }}"
+            CHART_REPO_ALIAS="${{ parameters.chartRepoAlias }}"
+            CHART_NAME="${{ parameters.chartName }}"
+            CHART_VERSION="${{ parameters.chartVersion }}"
+            LOCAL_CHART_PATH="${{ parameters.localChartPath }}"
+            CHART_AZURE_SUBSCRIPTION="${{ parameters.chartAzureSubscription }}"
+            CHART_REGISTRY_NAME="${{ parameters.chartRegistryName }}"
+            CHART_REGISTRY_LOGIN_SERVER="${{ parameters.chartRegistryLoginServer }}"
+            CHART_REPOSITORY="${{ parameters.chartRepository }}"
+            KUBE_VERSION="${{ parameters.kubeVersion }}"
+
+            case "$HELM_VALUES_MODE" in
+              convention|explicit) ;;
+              *)
+                echo "##[error]helmValuesMode must be 'convention' or 'explicit', got '$HELM_VALUES_MODE'."
+                exit 1
+                ;;
+            esac
+
+            case "$CHART_SOURCE" in
+              repo)
+                : "${CHART_REPO_URL:?chartRepoUrl parameter is missing or empty}"
+                : "${CHART_REPO_ALIAS:?chartRepoAlias parameter is missing or empty}"
+                : "${CHART_NAME:?chartName parameter is missing or empty}"
+                : "${CHART_VERSION:?chartVersion parameter is missing or empty}"
+                ;;
+              local)
+                : "${LOCAL_CHART_PATH:?localChartPath parameter is missing or empty}"
+                if [ ! -d "$LOCAL_CHART_PATH" ]; then
+                  echo "##[error]localChartPath '$LOCAL_CHART_PATH' does not exist."
+                  exit 1
+                fi
+                if [ ! -f "$LOCAL_CHART_PATH/Chart.yaml" ]; then
+                  echo "##[error]localChartPath '$LOCAL_CHART_PATH' does not contain Chart.yaml."
+                  exit 1
+                fi
+                ;;
+              oci)
+                : "${CHART_AZURE_SUBSCRIPTION:?chartAzureSubscription parameter is missing or empty}"
+                : "${CHART_REGISTRY_NAME:?chartRegistryName parameter is missing or empty}"
+                : "${CHART_REGISTRY_LOGIN_SERVER:?chartRegistryLoginServer parameter is missing or empty}"
+                : "${CHART_REPOSITORY:?chartRepository parameter is missing or empty}"
+                : "${CHART_NAME:?chartName parameter is missing or empty}"
+                : "${CHART_VERSION:?chartVersion parameter is missing or empty}"
+                ;;
+              *)
+                echo "##[error]chartSource must be 'repo', 'local', or 'oci', got '$CHART_SOURCE'."
+                exit 1
+                ;;
+            esac
+
+            : "${KUBE_VERSION:?kubeVersion parameter is missing or empty}"
+            echo "Helm parameters OK"
+
+  - ${{ if and(eq(parameters.helmValidate, true), eq(parameters.helmValuesMode, 'convention')) }}:
+      - ${{ each envName in parameters.helmEnvironments }}:
+          - task: Bash@3
+            displayName: 'Validate Helm values - ${{ envName }}'
+            inputs:
+              targetType: 'inline'
+              script: |
+                set -euo pipefail
+
+                HELM_OVERRIDES_DIR="${{ parameters.helmOverridesDir }}"
+                ENV_VALUES_FILE="$HELM_OVERRIDES_DIR/values-${{ envName }}.yaml"
+
+                : "${HELM_OVERRIDES_DIR:?helmOverridesDir parameter is missing or empty}"
+                if [ ! -d "$HELM_OVERRIDES_DIR" ]; then
+                  echo "##[error]helmOverridesDir '$HELM_OVERRIDES_DIR' does not exist."
+                  exit 1
+                fi
+                if [ ! -f "$ENV_VALUES_FILE" ]; then
+                  echo "##[error]Required Helm values file '$ENV_VALUES_FILE' does not exist."
+                  exit 1
+                fi
+
+                echo "Helm values OK for ${{ envName }}"
 
   - ${{ if eq(parameters.secretsScan, true) }}:
       - task: Bash@3
@@ -199,14 +338,8 @@ steps:
         inputs:
           targetType: 'inline'
           script: |
-            set -e
-            if ! command -v trivy &> /dev/null; then
-              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-            fi
+            set -euo pipefail
             JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
-            if [ ! -f "$JUNIT_TPL" ]; then
-              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
-            fi
             mkdir -p "$(Common.TestResultsDirectory)"
 
             REPORT="$(Agent.TempDirectory)/trivy-secrets-report.json"
@@ -225,8 +358,14 @@ steps:
         inputs:
           targetType: 'inline'
           script: |
-            set -e
-            python3 -m pip install --quiet --user --break-system-packages semgrep
+            set -euo pipefail
+            SEMGREP_PACKAGE="semgrep"
+            SEMGREP_VERSION="${{ parameters.semgrepVersion }}"
+            if [ -n "$SEMGREP_VERSION" ]; then
+              SEMGREP_PACKAGE="semgrep==$SEMGREP_VERSION"
+            fi
+
+            python3 -m pip install --quiet --user --break-system-packages "$SEMGREP_PACKAGE"
             export PATH="$HOME/.local/bin:$PATH"
             mkdir -p "$(Common.TestResultsDirectory)"
 
@@ -252,14 +391,8 @@ steps:
         inputs:
           targetType: 'inline'
           script: |
-            set -e
-            if ! command -v trivy &> /dev/null; then
-              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-            fi
+            set -euo pipefail
             JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
-            if [ ! -f "$JUNIT_TPL" ]; then
-              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
-            fi
             mkdir -p "$(Common.TestResultsDirectory)"
 
             REPORT="$(Agent.TempDirectory)/trivy-deps-report.json"
@@ -283,7 +416,7 @@ steps:
           targetType: 'inline'
           workingDirectory: ${{ parameters.appDir }}
           script: |
-            set -e
+            set -euo pipefail
             npm ci
 
       - task: Bash@3
@@ -292,7 +425,7 @@ steps:
           targetType: 'inline'
           workingDirectory: ${{ parameters.appDir }}
           script: |
-            set -e
+            set -euo pipefail
             npm run test:coverage
 
       - task: PublishTestResults@2
@@ -331,7 +464,7 @@ steps:
             inputs:
               targetType: 'inline'
               script: |
-                set -e
+                set -euo pipefail
                 # Same parameters used for the actual build/push, so the image scanned is
                 # always the exact image just built - not a different tag (e.g. if the
                 # caller overrides imageTag away from the $(Build.SourceVersion) default).
@@ -341,13 +474,7 @@ steps:
                 : "${IMAGE_REPOSITORY:?imageRepository parameter is missing or empty}"
                 IMAGE_REF="${REGISTRY_LOGIN_SERVER}/${IMAGE_REPOSITORY}:${{ parameters.imageTag }}"
 
-                if ! command -v trivy &> /dev/null; then
-                  curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-                fi
                 JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
-                if [ ! -f "$JUNIT_TPL" ]; then
-                  curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
-                fi
                 mkdir -p "$(Common.TestResultsDirectory)"
 
                 REPORT="$(Agent.TempDirectory)/trivy-image-report.json"
@@ -375,14 +502,8 @@ steps:
         inputs:
           targetType: 'inline'
           script: |
-            set -e
-            if ! command -v trivy &> /dev/null; then
-              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-            fi
+            set -euo pipefail
             JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
-            if [ ! -f "$JUNIT_TPL" ]; then
-              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
-            fi
             mkdir -p "$(Common.TestResultsDirectory)"
 
             REPORT="$(Agent.TempDirectory)/trivy-iac-report.json"
@@ -403,7 +524,7 @@ steps:
       - task: HelmInstaller@1
         displayName: 'Install Helm'
         inputs:
-          helmVersionToInstall: 'latest'
+          helmVersionToInstall: ${{ parameters.helmVersion }}
 
       - ${{ if eq(parameters.chartSource, 'oci') }}:
           - task: AzureCLI@2
@@ -455,7 +576,7 @@ steps:
                 inputs:
                   targetType: 'inline'
                   script: |
-                    set -e
+                    set -euo pipefail
                     WORKDIR=$(mktemp -d)
 
                     if [ "${{ parameters.chartSource }}" = "local" ]; then
@@ -495,13 +616,7 @@ steps:
                       --skip-tests \
                       > "$WORKDIR/rendered-${{ envName }}.yaml"
 
-                    if ! command -v trivy &> /dev/null; then
-                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-                    fi
                     JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
-                    if [ ! -f "$JUNIT_TPL" ]; then
-                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
-                    fi
                     mkdir -p "$(Common.TestResultsDirectory)"
 
                     REPORT="$(Agent.TempDirectory)/trivy-helm-${{ envName }}-report.json"
@@ -521,7 +636,7 @@ steps:
                 inputs:
                   targetType: 'inline'
                   script: |
-                    set -e
+                    set -euo pipefail
                     WORKDIR=$(mktemp -d)
 
                     if [ "${{ parameters.chartSource }}" = "local" ]; then
@@ -555,13 +670,7 @@ steps:
                       --skip-tests \
                       > "$WORKDIR/rendered-${{ entry.name }}.yaml"
 
-                    if ! command -v trivy &> /dev/null; then
-                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-                    fi
                     JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
-                    if [ ! -f "$JUNIT_TPL" ]; then
-                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
-                    fi
                     mkdir -p "$(Common.TestResultsDirectory)"
 
                     REPORT="$(Agent.TempDirectory)/trivy-helm-${{ entry.name }}-report.json"
@@ -588,7 +697,7 @@ steps:
                 inputs:
                   targetType: 'inline'
                   script: |
-                    set -e
+                    set -euo pipefail
                     SRC="${{ entry.path }}"
                     VARS_DIR="$(Build.ArtifactStagingDirectory)/${{ parameters.helmArtifactTargetSubfolder }}/vars"
                     mkdir -p "$VARS_DIR"

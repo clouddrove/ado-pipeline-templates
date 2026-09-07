@@ -264,6 +264,18 @@ steps:
 
 The run shows as "succeeded with issues" rather than a clean "succeeded" or a hard "failed" - each scan step that found something stays visibly red in the pipeline view and in the Tests tab, but Docker build/push, Helm validation, and everything else still runs. Once teams have worked through the backlog of findings, drop `scanContinueOnError` (or set it back to `false`) to make scanning hard-blocking again.
 
+**📌 Pin scanner/tool versions** - defaults preserve the old latest/default behavior, but production consumers can pin for repeatable runs:
+
+```yaml
+steps:
+  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      trivyVersion: 'v0.55.2'
+      semgrepVersion: '1.92.0'
+      helmVersion: '3.16.2'
+      # ...remaining required parameters as needed
+```
+
 ---
 
 ## Reference
@@ -291,6 +303,8 @@ The run shows as "succeeded with issues" rather than a clean "succeeded" or a ha
 | `scanSeverity` | string | `CRITICAL,HIGH` | Severity threshold that fails the build for Trivy-based scans |
 | `scanExitCode` | string | `1` | Exit code Trivy (and Semgrep) return when `scanSeverity` findings exist. Set to `0` to make findings non-blocking *and invisible* - the step shows green even with findings |
 | `scanContinueOnError` | boolean | `false` | `true`: a failing scan step still shows as failed (findings stay visible - not hidden like `scanExitCode: '0'`), but doesn't block later steps; the run shows as "succeeded with issues" instead of "failed". Applies to every scan step: secrets, SAST, dependency, image, IaC, and each Helm lint/render/scan pass |
+| `trivyVersion` | string | `''` | Optional Trivy version passed to the install script. Empty preserves the install script's default/latest behavior. Trivy is installed once near the start of the template when any Trivy-backed scan may run |
+| `semgrepVersion` | string | `''` | Optional Semgrep pip package version. Empty installs the latest available Semgrep package |
 | `sastRuleset` | string | `p/security-audit` | Semgrep ruleset |
 | `sastSeverity` | string | `ERROR` | Semgrep severity threshold that fails the build |
 | `iacScanPath` | string | `$(Build.SourcesDirectory)/Dockerfile` | Path scanned by `iacScan` |
@@ -313,7 +327,7 @@ The run shows as "succeeded with issues" rather than a clean "succeeded" or a ha
 | `buildContext` | string | `$(Build.SourcesDirectory)` | Docker build context |
 | `imageTag` | string | `$(Build.SourceVersion)` | Tag applied to the built image, and the same tag `imageScan` scans - no mismatch even if you override this |
 
-`containerRegistryServiceConnection`, `imageRepository`, and `registryLoginServer` are validated in a dedicated step whenever `dockerBuildPush` is `true`, regardless of how you supply them (literal value or your own `$(variable)` reference).
+`containerRegistryServiceConnection`, `imageRepository`, `registryLoginServer`, `dockerfilePath`, `buildContext`, and `imageTag` are validated in a dedicated step whenever `dockerBuildPush` is `true`, regardless of how you supply them (literal value or your own `$(variable)` reference).
 
 #### 🚢 Helm validation
 
@@ -334,11 +348,14 @@ The run shows as "succeeded with issues" rather than a clean "succeeded" or a ha
 | `chartRegistryLoginServer` | string | `''` | Registry FQDN, e.g. `myregistry.azurecr.io`; **required when `chartSource` is `oci`** |
 | `chartRepository` | string | `''` | Repository path within the registry, e.g. `helm/helmchart`; **required when `chartSource` is `oci`** |
 | `helmLintStrict` | boolean | `true` | Adds `--strict` to `helm lint`, failing on warnings too, not just errors |
+| `helmVersion` | string | `latest` | Helm version passed to `HelmInstaller@1`. Default preserves the previous latest behavior |
 | `kubeVersion` | string | `1.29.0` | Passed to `helm template --kube-version`, to catch API-version-specific issues |
 | `publishHelmArtifact` | boolean | `true` | Publish `helmArtifactSourceDir` as a pipeline artifact. **Independent of `helmValidate`** - each can be `true`/`false` regardless of the other |
 | `helmArtifactSourceDir` | string | `$(Build.SourcesDirectory)/helm` | Folder staged into the artifact |
 | `helmArtifactTargetSubfolder` | string | `helmchart` | Subfolder name within the staged artifact |
 | `helmArtifactName` | string | `drop` | Name of the published pipeline artifact |
+
+When `helmValidate` is `true`, the template now validates `helmValuesMode`, `chartSource`, and the required chart-source parameters before the lint/render loop. In `convention` mode it also checks that `helmOverridesDir` exists and that every required `values-<env>.yaml` file exists before Helm runs.
 
 ### 📤 Outputs
 
