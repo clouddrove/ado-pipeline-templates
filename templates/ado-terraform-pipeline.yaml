@@ -1,0 +1,343 @@
+parameters:
+  - name: terraformWorkingDirectory
+    type: string
+    default: ''
+
+  - name: terraformVersion
+    type: string
+    default: ''
+
+  - name: goVersion
+    type: string
+    default: ''
+
+  - name: smurfVersion
+    type: string
+    default: ''
+
+  - name: ServiceArm
+    type: string
+    default: ''
+
+  - name: agentPool
+    type: string
+    default: ''
+
+  - name: ResourceGroupName
+    type: string
+    default: ''
+
+  - name: StorageAccountName
+    type: string
+    default: ''
+
+  - name: ContainerName
+    type: string
+    default: ''
+
+  - name: Key
+    type: string
+    default: ''
+
+  - name: environment
+    type: string
+    default: ''
+
+  # ---- security scanning (same tool/pattern as ado-build-devsecops-pipeline.yaml) ----
+  - name: secretsScan
+    type: boolean
+    default: true
+  - name: iacScan
+    type: boolean
+    default: true
+  - name: scanSeverity
+    type: string
+    default: 'CRITICAL,HIGH'
+  - name: scanExitCode
+    type: string
+    default: '1'
+  - name: scanContinueOnError
+    type: boolean
+    default: false
+  - name: trivyVersion
+    type: string
+    default: ''
+
+  # ---- approved plan handoff ----
+  - name: terraformPlanArtifactName
+    type: string
+    default: 'terraform-plan'
+  - name: terraformPlanFileName
+    type: string
+    default: 'tfplan'
+
+stages:
+  - stage: terraform_init_plan
+    displayName: Terraform Init and Plan
+    pool:
+      name: ${{ parameters.agentPool }}
+    jobs:
+      - job: terraform_init_plan
+        displayName: Terraform Init, Validate and Plan
+        steps:
+          - checkout: self
+
+          - task: Bash@3
+            displayName: Validate required parameters
+            inputs:
+              targetType: 'inline'
+              script: |
+                set -euo pipefail
+
+                TERRAFORM_WORKING_DIRECTORY="${{ parameters.terraformWorkingDirectory }}"
+                TERRAFORM_VERSION="${{ parameters.terraformVersion }}"
+                GO_VERSION="${{ parameters.goVersion }}"
+                SMURF_VERSION="${{ parameters.smurfVersion }}"
+                SERVICE_ARM="${{ parameters.ServiceArm }}"
+                AGENT_POOL="${{ parameters.agentPool }}"
+                RESOURCE_GROUP_NAME="${{ parameters.ResourceGroupName }}"
+                STORAGE_ACCOUNT_NAME="${{ parameters.StorageAccountName }}"
+                CONTAINER_NAME="${{ parameters.ContainerName }}"
+                STATE_KEY="${{ parameters.Key }}"
+                ENVIRONMENT_NAME="${{ parameters.environment }}"
+                PLAN_ARTIFACT_NAME="${{ parameters.terraformPlanArtifactName }}"
+                PLAN_FILE_NAME="${{ parameters.terraformPlanFileName }}"
+
+                : "${TERRAFORM_WORKING_DIRECTORY:?terraformWorkingDirectory parameter is missing or empty}"
+                : "${TERRAFORM_VERSION:?terraformVersion parameter is missing or empty}"
+                : "${GO_VERSION:?goVersion parameter is missing or empty}"
+                : "${SMURF_VERSION:?smurfVersion parameter is missing or empty}"
+                : "${SERVICE_ARM:?ServiceArm parameter is missing or empty}"
+                : "${AGENT_POOL:?agentPool parameter is missing or empty}"
+                : "${RESOURCE_GROUP_NAME:?ResourceGroupName parameter is missing or empty}"
+                : "${STORAGE_ACCOUNT_NAME:?StorageAccountName parameter is missing or empty}"
+                : "${CONTAINER_NAME:?ContainerName parameter is missing or empty}"
+                : "${STATE_KEY:?Key parameter is missing or empty}"
+                : "${ENVIRONMENT_NAME:?environment parameter is missing or empty}"
+                : "${PLAN_ARTIFACT_NAME:?terraformPlanArtifactName parameter is missing or empty}"
+                : "${PLAN_FILE_NAME:?terraformPlanFileName parameter is missing or empty}"
+
+                if [ ! -d "$TERRAFORM_WORKING_DIRECTORY" ]; then
+                  echo "##[error]terraformWorkingDirectory '$TERRAFORM_WORKING_DIRECTORY' does not exist."
+                  exit 1
+                fi
+
+                echo "Required parameters OK"
+
+          - ${{ if eq(parameters.secretsScan, true) }}:
+              - task: Bash@3
+                displayName: 'Trivy: Secrets Scan'
+                continueOnError: ${{ parameters.scanContinueOnError }}
+                inputs:
+                  targetType: 'inline'
+                  script: |
+                    set -euo pipefail
+                    if ! command -v trivy &> /dev/null; then
+                      TRIVY_VERSION="${{ parameters.trivyVersion }}"
+                      if [ -n "$TRIVY_VERSION" ]; then
+                        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin "$TRIVY_VERSION"
+                      else
+                        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+                      fi
+                    fi
+                    JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+                    if [ ! -f "$JUNIT_TPL" ]; then
+                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+                    fi
+                    mkdir -p "$(Common.TestResultsDirectory)"
+
+                    REPORT="$(Agent.TempDirectory)/trivy-secrets-report.json"
+                    trivy fs --scanners secret --format json --output "$REPORT" "${{ parameters.terraformWorkingDirectory }}"
+
+                    trivy convert --format table "$REPORT"
+                    trivy convert --format template --template "@$JUNIT_TPL" \
+                      --output "$(Common.TestResultsDirectory)/TEST-trivy-secrets-scan.xml" "$REPORT"
+
+                    trivy convert --format json --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
+
+          - ${{ if eq(parameters.iacScan, true) }}:
+              - task: Bash@3
+                displayName: 'Trivy: Terraform IaC Scan'
+                continueOnError: ${{ parameters.scanContinueOnError }}
+                inputs:
+                  targetType: 'inline'
+                  script: |
+                    set -euo pipefail
+                    if ! command -v trivy &> /dev/null; then
+                      TRIVY_VERSION="${{ parameters.trivyVersion }}"
+                      if [ -n "$TRIVY_VERSION" ]; then
+                        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin "$TRIVY_VERSION"
+                      else
+                        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+                      fi
+                    fi
+                    JUNIT_TPL="$(Agent.TempDirectory)/trivy-junit.tpl"
+                    if [ ! -f "$JUNIT_TPL" ]; then
+                      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/junit.tpl -o "$JUNIT_TPL"
+                    fi
+                    mkdir -p "$(Common.TestResultsDirectory)"
+
+                    REPORT="$(Agent.TempDirectory)/trivy-terraform-iac-report.json"
+                    trivy config --include-non-failures --format json --output "$REPORT" "${{ parameters.terraformWorkingDirectory }}"
+
+                    trivy convert --format table --severity ${{ parameters.scanSeverity }} "$REPORT"
+                    # Not severity-filtering this conversion: trivy convert --severity drops
+                    # individual Misconfigurations entries (even passing ones) rather than
+                    # keeping the matched subset. Full detail goes to the report; the gate
+                    # below stays severity-scoped.
+                    trivy convert --format template --template "@$JUNIT_TPL" \
+                      --output "$(Common.TestResultsDirectory)/TEST-trivy-terraform-iac-scan.xml" "$REPORT"
+
+                    trivy convert --format json --severity ${{ parameters.scanSeverity }} --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
+
+          - task: PublishTestResults@2
+            displayName: 'Publish Security Scan Results'
+            condition: always()
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: 'TEST-*.xml'
+              searchFolder: '$(Common.TestResultsDirectory)'
+              testRunTitle: 'Security Scans'
+              mergeTestResults: true
+              failTaskOnFailedTests: false
+
+          - task: TerraformInstaller@1
+            displayName: Install Terraform
+            inputs:
+              terraformVersion: ${{ parameters.terraformVersion }}
+
+          - task: GoTool@0
+            displayName: Install Go
+            inputs:
+              version: ${{ parameters.goVersion }}
+
+          - bash: |
+              set -euo pipefail
+              export PATH="$PATH:$(go env GOPATH)/bin"
+
+              go install github.com/clouddrove/smurf@${{ parameters.smurfVersion }}
+
+              smurf --version
+            displayName: Install Smurf
+
+          - task: AzureCLI@2
+            displayName: Smurf Terraform Init, Validate and Plan
+            inputs:
+              azureSubscription: ${{ parameters.ServiceArm }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                export PATH="$PATH:$(go env GOPATH)/bin"
+
+                export ARM_USE_OIDC=true
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id --output tsv)"
+
+                cd "${{ parameters.terraformWorkingDirectory }}"
+                PLAN_FILE="$(Build.ArtifactStagingDirectory)/${{ parameters.terraformPlanFileName }}"
+                mkdir -p "$(Build.ArtifactStagingDirectory)"
+
+                smurf stf init \
+                  --backend-config="resource_group_name=${{ parameters.ResourceGroupName }}" \
+                  --backend-config="storage_account_name=${{ parameters.StorageAccountName }}" \
+                  --backend-config="container_name=${{ parameters.ContainerName }}" \
+                  --backend-config="key=${{ parameters.Key }}"
+
+                smurf stf validate
+                smurf stf plan --out="$PLAN_FILE"
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish Terraform Plan
+            inputs:
+              targetPath: '$(Build.ArtifactStagingDirectory)/${{ parameters.terraformPlanFileName }}'
+              artifact: '${{ parameters.terraformPlanArtifactName }}'
+              publishLocation: 'pipeline'
+
+  - stage: terraform_approval
+    displayName: Terraform Approval
+    dependsOn: terraform_init_plan
+    condition: succeeded()
+    jobs:
+      - deployment: validatefordeploy
+        displayName: Wait for Approval
+        environment: ${{ parameters.environment }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - bash: |
+                    echo "Approval granted. Terraform apply can start."
+                  displayName: Approval granted
+
+  - stage: terraform_apply
+    displayName: Terraform Apply
+    pool:
+      name: ${{ parameters.agentPool }}
+    dependsOn: terraform_approval
+    condition: succeeded()
+    jobs:
+      - job: terraform_apply
+        displayName: Terraform Apply with Smurf
+        steps:
+          - checkout: self
+
+          - task: DownloadPipelineArtifact@2
+            displayName: Download Terraform Plan
+            inputs:
+              buildType: 'current'
+              artifactName: '${{ parameters.terraformPlanArtifactName }}'
+              targetPath: '$(Pipeline.Workspace)/${{ parameters.terraformPlanArtifactName }}'
+
+          - task: TerraformInstaller@1
+            displayName: Install Terraform
+            inputs:
+              terraformVersion: ${{ parameters.terraformVersion }}
+
+          - task: GoTool@0
+            displayName: Install Go
+            inputs:
+              version: ${{ parameters.goVersion }}
+
+          - bash: |
+              set -euo pipefail
+              export PATH="$PATH:$(go env GOPATH)/bin"
+
+              go install github.com/clouddrove/smurf@${{ parameters.smurfVersion }}
+
+              smurf --version
+            displayName: Install Smurf
+
+          - task: AzureCLI@2
+            displayName: Smurf Terraform Init and Apply
+            inputs:
+              azureSubscription: ${{ parameters.ServiceArm }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                export PATH="$PATH:$(go env GOPATH)/bin"
+
+                export ARM_USE_OIDC=true
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id --output tsv)"
+
+                cd "${{ parameters.terraformWorkingDirectory }}"
+                PLAN_FILE="$(Pipeline.Workspace)/${{ parameters.terraformPlanArtifactName }}/${{ parameters.terraformPlanFileName }}"
+
+                if [ ! -f "$PLAN_FILE" ]; then
+                  echo "##[error]Terraform plan artifact '$PLAN_FILE' was not found."
+                  exit 1
+                fi
+
+                smurf stf init \
+                  --backend-config="resource_group_name=${{ parameters.ResourceGroupName }}" \
+                  --backend-config="storage_account_name=${{ parameters.StorageAccountName }}" \
+                  --backend-config="container_name=${{ parameters.ContainerName }}" \
+                  --backend-config="key=${{ parameters.Key }}"
+
+                smurf stf apply "$PLAN_FILE"
