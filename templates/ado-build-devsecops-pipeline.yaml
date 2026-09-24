@@ -1,29 +1,29 @@
 parameters:
   # ---- toggles: turn each concern on/off ----
   - name: secretsScan
-    type: boolean
-    default: true
+    type: string
+    default: 'false'
   - name: sastScan
-    type: boolean
-    default: true
+    type: string
+    default: 'false'
   - name: dependencyScan
-    type: boolean
-    default: true
+    type: string
+    default: 'false'
   - name: testCoverage
-    type: boolean
-    default: true
+    type: string
+    default: 'false'
   - name: dockerBuildPush
-    type: boolean
-    default: true
+    type: string
+    default: 'false'
   - name: imageScan
-    type: boolean
-    default: true      # only takes effect when dockerBuildPush is also true
+    type: string
+    default: 'false'      # only takes effect when dockerBuildPush is also true
   - name: iacScan
-    type: boolean
-    default: true
+    type: string
+    default: 'false'
   - name: helmValidate
-    type: boolean
-    default: true
+    type: string
+    default: 'false'
 
   # ---- shared scan config ----
   - name: scanPath
@@ -37,11 +37,12 @@ parameters:
     default: '1'
   - name: scanContinueOnError
     type: boolean
-    default: false  # true: a failing scan step still shows as failed (findings stay
-                     # visible), but doesn't block later steps from running - the overall
-                     # run shows as "succeeded with issues" instead of "failed". Orthogonal
-                     # to scanExitCode: that controls whether a scan fails at all; this
-                     # controls whether a failure blocks the rest of the pipeline.
+    default: false  # Compile-time task property; callers must pass a literal boolean,
+                    # not a runtime $(variable). true: a failing scan step still shows as
+                    # failed (findings stay visible), but doesn't block later steps from
+                    # running - the overall run shows as "succeeded with issues" instead
+                    # of "failed". Orthogonal to scanExitCode: that controls whether a
+                    # scan fails at all; this controls whether a failure blocks the rest.
   - name: trivyVersion
     type: string
     default: ''     # empty preserves the Trivy install script's default/latest behavior
@@ -149,8 +150,8 @@ parameters:
     type: string
     default: ''   # repository path within the registry, e.g. 'helm/helmchart' - required when chartSource is 'oci'
   - name: helmLintStrict
-    type: boolean
-    default: true       # `helm lint --strict` fails on warnings too, not just errors
+    type: string
+    default: 'false'       # `true` makes `helm lint` fail on warnings too
   - name: helmVersion
     type: string
     default: 'latest'
@@ -160,8 +161,8 @@ parameters:
 
   # ---- helm chart artifact (for a downstream Release pipeline) ----
   - name: publishHelmArtifact
-    type: boolean
-    default: true       # independent of helmValidate - publishes regardless of whether validation ran
+    type: string
+    default: 'false'       # independent of helmValidate - publishes regardless of whether validation ran
   - name: helmArtifactSourceDir
     type: string
     default: '$(Build.SourcesDirectory)/helm'
@@ -173,9 +174,22 @@ parameters:
     default: 'drop'
 
 steps:
-  - ${{ if or(eq(parameters.secretsScan, true), eq(parameters.dependencyScan, true), eq(parameters.imageScan, true), eq(parameters.iacScan, true), eq(parameters.helmValidate, true)) }}:
+  # Toggle parameters are strings so callers can pass runtime values such as
+  # $(my-variable-group-toggle). Literal "false" still removes a section at
+  # compile time. Each runtime condition strips the $() wrapper at template
+  # expansion time and then reads the named Variable Group value through the
+  # runtime variables[] context. The compile-time branch also supports literals.
+  - ${{ if or(ne(lower(parameters.secretsScan), 'false'), ne(lower(parameters.dependencyScan), 'false'), ne(lower(parameters.imageScan), 'false'), ne(lower(parameters.iacScan), 'false'), ne(lower(parameters.helmValidate), 'false')) }}:
       - task: Bash@3
         displayName: 'Setup Trivy'
+        condition: |
+          and(succeeded(), or(
+            or(${{ eq(lower(parameters.secretsScan), 'true') }}, and(${{ startsWith(parameters.secretsScan, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.secretsScan, '$(', ''), ')', '') }}']), 'true'))),
+            or(${{ eq(lower(parameters.dependencyScan), 'true') }}, and(${{ startsWith(parameters.dependencyScan, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.dependencyScan, '$(', ''), ')', '') }}']), 'true'))),
+            or(${{ eq(lower(parameters.imageScan), 'true') }}, and(${{ startsWith(parameters.imageScan, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.imageScan, '$(', ''), ')', '') }}']), 'true'))),
+            or(${{ eq(lower(parameters.iacScan), 'true') }}, and(${{ startsWith(parameters.iacScan, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.iacScan, '$(', ''), ')', '') }}']), 'true'))),
+            or(${{ eq(lower(parameters.helmValidate), 'true') }}, and(${{ startsWith(parameters.helmValidate, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.helmValidate, '$(', ''), ')', '') }}']), 'true')))
+          ))
         inputs:
           targetType: 'inline'
           script: |
@@ -198,9 +212,10 @@ steps:
             mkdir -p "$(Common.TestResultsDirectory)"
             trivy --version
 
-  - ${{ if eq(parameters.dockerBuildPush, true) }}:
+  - ${{ if ne(lower(parameters.dockerBuildPush), 'false') }}:
       - task: Bash@3
         displayName: 'Validate Docker parameters'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.dockerBuildPush), 'true') }}, and(${{ startsWith(parameters.dockerBuildPush, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.dockerBuildPush, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           targetType: 'inline'
           script: |
@@ -243,9 +258,10 @@ steps:
 
             echo "Docker parameters OK"
 
-  - ${{ if eq(parameters.helmValidate, true) }}:
+  - ${{ if ne(lower(parameters.helmValidate), 'false') }}:
       - task: Bash@3
         displayName: 'Validate Helm parameters'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.helmValidate), 'true') }}, and(${{ startsWith(parameters.helmValidate, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.helmValidate, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           targetType: 'inline'
           script: |
@@ -307,10 +323,11 @@ steps:
             : "${KUBE_VERSION:?kubeVersion parameter is missing or empty}"
             echo "Helm parameters OK"
 
-  - ${{ if and(eq(parameters.helmValidate, true), eq(parameters.helmValuesMode, 'convention')) }}:
+  - ${{ if and(ne(lower(parameters.helmValidate), 'false'), eq(parameters.helmValuesMode, 'convention')) }}:
       - ${{ each envName in parameters.helmEnvironments }}:
           - task: Bash@3
             displayName: 'Validate Helm values - ${{ envName }}'
+            condition: and(succeeded(), or(${{ eq(lower(parameters.helmValidate), 'true') }}, and(${{ startsWith(parameters.helmValidate, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.helmValidate, '$(', ''), ')', '') }}']), 'true'))))
             inputs:
               targetType: 'inline'
               script: |
@@ -331,9 +348,10 @@ steps:
 
                 echo "Helm values OK for ${{ envName }}"
 
-  - ${{ if eq(parameters.secretsScan, true) }}:
+  - ${{ if ne(lower(parameters.secretsScan), 'false') }}:
       - task: Bash@3
         displayName: 'Trivy: Secrets Scan'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.secretsScan), 'true') }}, and(${{ startsWith(parameters.secretsScan, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.secretsScan, '$(', ''), ')', '') }}']), 'true'))))
         continueOnError: ${{ parameters.scanContinueOnError }}
         inputs:
           targetType: 'inline'
@@ -351,9 +369,10 @@ steps:
 
             trivy convert --format json --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
 
-  - ${{ if eq(parameters.sastScan, true) }}:
+  - ${{ if ne(lower(parameters.sastScan), 'false') }}:
       - task: Bash@3
         displayName: 'Semgrep: SAST Scan'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.sastScan), 'true') }}, and(${{ startsWith(parameters.sastScan, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.sastScan, '$(', ''), ')', '') }}']), 'true'))))
         continueOnError: ${{ parameters.scanContinueOnError }}
         inputs:
           targetType: 'inline'
@@ -384,9 +403,10 @@ steps:
               --junit-xml-output="$(Common.TestResultsDirectory)/TEST-semgrep-sast-scan.xml" \
               "${{ parameters.scanPath }}"
 
-  - ${{ if eq(parameters.dependencyScan, true) }}:
+  - ${{ if ne(lower(parameters.dependencyScan), 'false') }}:
       - task: Bash@3
         displayName: 'Trivy: Dependency / SCA Scan'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.dependencyScan), 'true') }}, and(${{ startsWith(parameters.dependencyScan, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.dependencyScan, '$(', ''), ')', '') }}']), 'true'))))
         continueOnError: ${{ parameters.scanContinueOnError }}
         inputs:
           targetType: 'inline'
@@ -404,14 +424,16 @@ steps:
 
             trivy convert --format json --severity ${{ parameters.scanSeverity }} --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
 
-  - ${{ if eq(parameters.testCoverage, true) }}:
+  - ${{ if ne(lower(parameters.testCoverage), 'false') }}:
       - task: UseNode@1
         displayName: 'Use Node.js ${{ parameters.nodeVersion }}'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.testCoverage), 'true') }}, and(${{ startsWith(parameters.testCoverage, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.testCoverage, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           version: ${{ parameters.nodeVersion }}
 
       - task: Bash@3
         displayName: 'npm ci'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.testCoverage), 'true') }}, and(${{ startsWith(parameters.testCoverage, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.testCoverage, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           targetType: 'inline'
           workingDirectory: ${{ parameters.appDir }}
@@ -421,6 +443,7 @@ steps:
 
       - task: Bash@3
         displayName: 'Unit Tests + Coverage'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.testCoverage), 'true') }}, and(${{ startsWith(parameters.testCoverage, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.testCoverage, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           targetType: 'inline'
           workingDirectory: ${{ parameters.appDir }}
@@ -430,7 +453,7 @@ steps:
 
       - task: PublishTestResults@2
         displayName: 'Publish Unit Test Results'
-        condition: always()
+        condition: and(always(), or(${{ eq(lower(parameters.testCoverage), 'true') }}, and(${{ startsWith(parameters.testCoverage, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.testCoverage, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           testResultsFormat: 'JUnit'
           testResultsFiles: 'test-results.xml'
@@ -440,13 +463,14 @@ steps:
 
       - task: PublishCodeCoverageResults@2
         displayName: 'Publish Code Coverage'
-        condition: always()
+        condition: and(always(), or(${{ eq(lower(parameters.testCoverage), 'true') }}, and(${{ startsWith(parameters.testCoverage, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.testCoverage, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           summaryFileLocation: '${{ parameters.appDir }}/coverage/cobertura-coverage.xml'
 
-  - ${{ if eq(parameters.dockerBuildPush, true) }}:
+  - ${{ if ne(lower(parameters.dockerBuildPush), 'false') }}:
       - task: Docker@2
         displayName: 'Docker: build image'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.dockerBuildPush), 'true') }}, and(${{ startsWith(parameters.dockerBuildPush, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.dockerBuildPush, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           containerRegistry: ${{ parameters.containerRegistryServiceConnection }}
           repository: ${{ parameters.imageRepository }}
@@ -457,9 +481,10 @@ steps:
           tags: |
             ${{ parameters.imageTag }}
 
-      - ${{ if eq(parameters.imageScan, true) }}:
+      - ${{ if ne(lower(parameters.imageScan), 'false') }}:
           - task: Bash@3
             displayName: 'Trivy: Container Image Scan'
+            condition: and(succeeded(), or(${{ eq(lower(parameters.dockerBuildPush), 'true') }}, and(${{ startsWith(parameters.dockerBuildPush, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.dockerBuildPush, '$(', ''), ')', '') }}']), 'true'))), or(${{ eq(lower(parameters.imageScan), 'true') }}, and(${{ startsWith(parameters.imageScan, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.imageScan, '$(', ''), ')', '') }}']), 'true'))))
             continueOnError: ${{ parameters.scanContinueOnError }}
             inputs:
               targetType: 'inline'
@@ -488,6 +513,7 @@ steps:
 
       - task: Docker@2
         displayName: 'Docker: push image'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.dockerBuildPush), 'true') }}, and(${{ startsWith(parameters.dockerBuildPush, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.dockerBuildPush, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           containerRegistry: ${{ parameters.containerRegistryServiceConnection }}
           repository: ${{ parameters.imageRepository }}
@@ -495,9 +521,10 @@ steps:
           tags: |
             ${{ parameters.imageTag }}
 
-  - ${{ if eq(parameters.iacScan, true) }}:
+  - ${{ if ne(lower(parameters.iacScan), 'false') }}:
       - task: Bash@3
         displayName: 'Trivy: IaC / Misconfig Scan'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.iacScan), 'true') }}, and(${{ startsWith(parameters.iacScan, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.iacScan, '$(', ''), ')', '') }}']), 'true'))))
         continueOnError: ${{ parameters.scanContinueOnError }}
         inputs:
           targetType: 'inline'
@@ -520,15 +547,17 @@ steps:
 
             trivy convert --format json --severity ${{ parameters.scanSeverity }} --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
 
-  - ${{ if eq(parameters.helmValidate, true) }}:
+  - ${{ if ne(lower(parameters.helmValidate), 'false') }}:
       - task: HelmInstaller@1
         displayName: 'Install Helm'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.helmValidate), 'true') }}, and(${{ startsWith(parameters.helmValidate, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.helmValidate, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           helmVersionToInstall: ${{ parameters.helmVersion }}
 
       - ${{ if eq(parameters.chartSource, 'oci') }}:
           - task: AzureCLI@2
             displayName: 'Pull OCI Helm chart'
+            condition: and(succeeded(), or(${{ eq(lower(parameters.helmValidate), 'true') }}, and(${{ startsWith(parameters.helmValidate, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.helmValidate, '$(', ''), ')', '') }}']), 'true'))))
             inputs:
               azureSubscription: ${{ parameters.chartAzureSubscription }}
               scriptType: bash
@@ -572,6 +601,7 @@ steps:
           - ${{ each envName in parameters.helmEnvironments }}:
               - task: Bash@3
                 displayName: 'Helm Lint/Render/Scan - ${{ envName }}'
+                condition: and(succeeded(), or(${{ eq(lower(parameters.helmValidate), 'true') }}, and(${{ startsWith(parameters.helmValidate, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.helmValidate, '$(', ''), ')', '') }}']), 'true'))))
                 continueOnError: ${{ parameters.scanContinueOnError }}
                 inputs:
                   targetType: 'inline'
@@ -632,6 +662,7 @@ steps:
           - ${{ each entry in parameters.helmValuesFiles }}:
               - task: Bash@3
                 displayName: 'Helm Lint/Render/Scan - ${{ entry.name }}'
+                condition: and(succeeded(), or(${{ eq(lower(parameters.helmValidate), 'true') }}, and(${{ startsWith(parameters.helmValidate, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.helmValidate, '$(', ''), ')', '') }}']), 'true'))))
                 continueOnError: ${{ parameters.scanContinueOnError }}
                 inputs:
                   targetType: 'inline'
@@ -682,9 +713,10 @@ steps:
 
                     trivy convert --format json --severity ${{ parameters.scanSeverity }} --exit-code ${{ parameters.scanExitCode }} --output /dev/null "$REPORT"
 
-  - ${{ if eq(parameters.publishHelmArtifact, true) }}:
+  - ${{ if ne(lower(parameters.publishHelmArtifact), 'false') }}:
       - task: CopyFiles@2
         displayName: 'Stage Chart Artifact'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.publishHelmArtifact), 'true') }}, and(${{ startsWith(parameters.publishHelmArtifact, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.publishHelmArtifact, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           SourceFolder: '${{ parameters.helmArtifactSourceDir }}'
           Contents: '**'
@@ -694,6 +726,7 @@ steps:
           - ${{ each entry in parameters.helmValuesFiles }}:
               - task: Bash@3
                 displayName: 'Stage values file - ${{ entry.name }}'
+                condition: and(succeeded(), or(${{ eq(lower(parameters.publishHelmArtifact), 'true') }}, and(${{ startsWith(parameters.publishHelmArtifact, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.publishHelmArtifact, '$(', ''), ')', '') }}']), 'true'))))
                 inputs:
                   targetType: 'inline'
                   script: |
@@ -719,6 +752,7 @@ steps:
 
       - task: PublishPipelineArtifact@1
         displayName: 'Publish Helm Chart Artifact'
+        condition: and(succeeded(), or(${{ eq(lower(parameters.publishHelmArtifact), 'true') }}, and(${{ startsWith(parameters.publishHelmArtifact, '$(') }}, eq(lower(variables['${{ replace(replace(parameters.publishHelmArtifact, '$(', ''), ')', '') }}']), 'true'))))
         inputs:
           targetPath: '$(Build.ArtifactStagingDirectory)'
           artifact: '${{ parameters.helmArtifactName }}'

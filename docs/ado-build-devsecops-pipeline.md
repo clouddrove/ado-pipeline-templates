@@ -4,7 +4,7 @@
 <a href="../templates/ado-build-devsecops-pipeline.yaml"><strong>📄 Template reference</strong></a>
 </p>
 
-A single Azure Pipelines step template covering secret scanning, SAST, dependency/SCA scanning, unit tests with coverage, Docker build/scan/push, IaC misconfiguration scanning, and multi-environment Helm chart validation. Every concern is gated behind its own boolean parameter, so a consumer pipeline enables exactly what it needs without wiring in separate templates per check.
+A single Azure Pipelines step template covering secret scanning, SAST, dependency/SCA scanning, unit tests with coverage, Docker build/scan/push, IaC misconfiguration scanning, and multi-environment Helm chart validation. Every concern is gated behind its own `true`/`false` string parameter, so a consumer pipeline can use either literal values or runtime values from an Azure DevOps variable group.
 
 ---
 
@@ -92,7 +92,7 @@ parameters:
 
 ### 🚀 Usage
 
-**✅ Minimal** - everything enabled with defaults, registry parameters passed explicitly (they have no fallback):
+**✅ Minimal opt-in** - all features default to `false`, so enable only what this pipeline needs:
 
 ```yaml
 resources:
@@ -106,6 +106,7 @@ resources:
 steps:
   - template: templates/ado-build-devsecops-pipeline.yaml@templates
     parameters:
+      dockerBuildPush: true
       containerRegistryServiceConnection: 'my-acr-connection'
       imageRepository: 'my-app'
       registryLoginServer: 'myregistry.azurecr.io'
@@ -129,6 +130,28 @@ steps:
       imageRepository: '$(imageRepository)'
       registryLoginServer: '$(registryLoginServer)'
 ```
+
+Variable groups are supported for toggle parameters too. Link the group in the consuming pipeline and pass its runtime variables to the template:
+
+```yaml
+variables:
+  - group: security-scan-control
+
+steps:
+  - template: templates/ado-build-devsecops-pipeline.yaml@templates
+    parameters:
+      secretsScan: '$(my-app-secretsScan)'
+      sastScan: '$(my-app-sastScan)'
+      dependencyScan: '$(my-app-dependencyScan)'
+      imageScan: '$(my-app-imageScan)'
+      iacScan: '$(my-app-iacScan)'
+      helmValidate: '$(my-app-helmScan)'
+      # Must be a literal Boolean because it is assigned to the task-level
+      # continueOnError property during template expansion.
+      scanContinueOnError: false
+```
+
+The referenced toggle variables must contain `true` or `false` (case-insensitive). `scanContinueOnError` is the exception: it must be a literal Boolean because Azure requires the task-level `continueOnError` property during template expansion. The variable group must be authorized for the consuming pipeline in Azure DevOps. Because this file is a step template, the `variables: - group:` declaration belongs in the consuming pipeline, at pipeline or job scope.
 
 **🎯 Selective** - only run a subset of checks, with a couple of paths overridden:
 
@@ -286,14 +309,14 @@ steps:
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `secretsScan` | boolean | `true` | 🔑 Trivy secret scan over `scanPath` |
-| `sastScan` | boolean | `true` | 🕵️ Semgrep SAST scan over `scanPath` |
-| `dependencyScan` | boolean | `true` | 📦 Trivy dependency/SCA scan over `scanPath` |
-| `testCoverage` | boolean | `true` | 🧪 Node.js unit tests + coverage in `appDir` |
-| `dockerBuildPush` | boolean | `true` | 🐳 Docker build then push via `containerRegistryServiceConnection` |
-| `imageScan` | boolean | `true` | 🔍 Trivy image scan; only runs when `dockerBuildPush` is also `true` |
-| `iacScan` | boolean | `true` | 🏗️ Trivy config/misconfig scan over `iacScanPath` |
-| `helmValidate` | boolean | `true` | 🚢 Pull, lint, render, and scan the Helm chart per entry in `helmEnvironments` |
+| `secretsScan` | string (`true`/`false`) | `false` | 🔑 Trivy secret scan over `scanPath` |
+| `sastScan` | string (`true`/`false`) | `false` | 🕵️ Semgrep SAST scan over `scanPath` |
+| `dependencyScan` | string (`true`/`false`) | `false` | 📦 Trivy dependency/SCA scan over `scanPath` |
+| `testCoverage` | string (`true`/`false`) | `false` | 🧪 Node.js unit tests + coverage in `appDir` |
+| `dockerBuildPush` | string (`true`/`false`) | `false` | 🐳 Docker build then push via `containerRegistryServiceConnection` |
+| `imageScan` | string (`true`/`false`) | `false` | 🔍 Trivy image scan; only runs when `dockerBuildPush` is also `true` |
+| `iacScan` | string (`true`/`false`) | `false` | 🏗️ Trivy config/misconfig scan over `iacScanPath` |
+| `helmValidate` | string (`true`/`false`) | `false` | 🚢 Pull, lint, render, and scan the Helm chart per entry in `helmEnvironments` |
 
 #### 🔎 Scan configuration
 
@@ -302,7 +325,7 @@ steps:
 | `scanPath` | string | `$(Build.SourcesDirectory)` | Path scanned by `secretsScan`, `sastScan`, `dependencyScan` |
 | `scanSeverity` | string | `CRITICAL,HIGH` | Severity threshold that fails the build for Trivy-based scans |
 | `scanExitCode` | string | `1` | Exit code Trivy (and Semgrep) return when `scanSeverity` findings exist. Set to `0` to make findings non-blocking *and invisible* - the step shows green even with findings |
-| `scanContinueOnError` | boolean | `false` | `true`: a failing scan step still shows as failed (findings stay visible - not hidden like `scanExitCode: '0'`), but doesn't block later steps; the run shows as "succeeded with issues" instead of "failed". Applies to every scan step: secrets, SAST, dependency, image, IaC, and each Helm lint/render/scan pass |
+| `scanContinueOnError` | boolean | `false` | Compile-time parameter; pass a literal `true` or `false`, not `$(variable)`. `true`: a failing scan step still shows as failed (findings stay visible - not hidden like `scanExitCode: '0'`), but doesn't block later steps; the run shows as "succeeded with issues" instead of "failed". Applies to every scan step: secrets, SAST, dependency, image, IaC, and each Helm lint/render/scan pass |
 | `trivyVersion` | string | `''` | Optional Trivy version passed to the install script. Empty preserves the install script's default/latest behavior. Trivy is installed once near the start of the template when any Trivy-backed scan may run |
 | `semgrepVersion` | string | `''` | Optional Semgrep pip package version. Empty installs the latest available Semgrep package |
 | `sastRuleset` | string | `p/security-audit` | Semgrep ruleset |
@@ -347,10 +370,10 @@ steps:
 | `chartRegistryName` | string | `''` | Bare ACR name (not the login server), e.g. `myregistry`; **required when `chartSource` is `oci`** |
 | `chartRegistryLoginServer` | string | `''` | Registry FQDN, e.g. `myregistry.azurecr.io`; **required when `chartSource` is `oci`** |
 | `chartRepository` | string | `''` | Repository path within the registry, e.g. `helm/helmchart`; **required when `chartSource` is `oci`** |
-| `helmLintStrict` | boolean | `true` | Adds `--strict` to `helm lint`, failing on warnings too, not just errors |
+| `helmLintStrict` | string (`true`/`false`) | `false` | When enabled, adds `--strict` to `helm lint`, failing on warnings too, not just errors |
 | `helmVersion` | string | `latest` | Helm version passed to `HelmInstaller@1`. Default preserves the previous latest behavior |
 | `kubeVersion` | string | `1.29.0` | Passed to `helm template --kube-version`, to catch API-version-specific issues |
-| `publishHelmArtifact` | boolean | `true` | Publish `helmArtifactSourceDir` as a pipeline artifact. **Independent of `helmValidate`** - each can be `true`/`false` regardless of the other |
+| `publishHelmArtifact` | string (`true`/`false`) | `false` | Publish `helmArtifactSourceDir` as a pipeline artifact. **Independent of `helmValidate`** - each can be `true`/`false` regardless of the other |
 | `helmArtifactSourceDir` | string | `$(Build.SourcesDirectory)/helm` | Folder staged into the artifact |
 | `helmArtifactTargetSubfolder` | string | `helmchart` | Subfolder name within the staged artifact |
 | `helmArtifactName` | string | `drop` | Name of the published pipeline artifact |
