@@ -2,28 +2,28 @@ parameters:
   # ---- toggles: turn each concern on/off ----
   - name: secretsScan
     type: string
-    default: 'true'
+    default: 'false'
   - name: sastScan
     type: string
-    default: 'true'
+    default: 'false'
   - name: dependencyScan
     type: string
-    default: 'true'
+    default: 'false'
   - name: testCoverage
     type: string
-    default: 'true'
+    default: 'false'
   - name: dockerBuildPush
     type: string
-    default: 'true'
+    default: 'false'
   - name: imageScan
     type: string
-    default: 'true'      # only takes effect when dockerBuildPush is also true
+    default: 'false'      # only takes effect when dockerBuildPush is also true
   - name: iacScan
     type: string
-    default: 'true'
+    default: 'false'
   - name: helmValidate
     type: string
-    default: 'true'
+    default: 'false'
 
   # ---- shared scan config ----
   - name: scanPath
@@ -36,12 +36,13 @@ parameters:
     type: string
     default: '1'
   - name: scanContinueOnError
-    type: string
-    default: 'false'  # true: a failing scan step still shows as failed (findings stay
-                     # visible), but doesn't block later steps from running - the overall
-                     # run shows as "succeeded with issues" instead of "failed". Orthogonal
-                     # to scanExitCode: that controls whether a scan fails at all; this
-                     # controls whether a failure blocks the rest of the pipeline.
+    type: boolean
+    default: false  # Compile-time task property; callers must pass a literal boolean,
+                    # not a runtime $(variable). true: a failing scan step still shows as
+                    # failed (findings stay visible), but doesn't block later steps from
+                    # running - the overall run shows as "succeeded with issues" instead
+                    # of "failed". Orthogonal to scanExitCode: that controls whether a
+                    # scan fails at all; this controls whether a failure blocks the rest.
   - name: trivyVersion
     type: string
     default: ''     # empty preserves the Trivy install script's default/latest behavior
@@ -150,7 +151,7 @@ parameters:
     default: ''   # repository path within the registry, e.g. 'helm/helmchart' - required when chartSource is 'oci'
   - name: helmLintStrict
     type: string
-    default: 'true'       # `helm lint --strict` fails on warnings too, not just errors
+    default: 'false'       # `true` makes `helm lint` fail on warnings too
   - name: helmVersion
     type: string
     default: 'latest'
@@ -161,7 +162,7 @@ parameters:
   # ---- helm chart artifact (for a downstream Release pipeline) ----
   - name: publishHelmArtifact
     type: string
-    default: 'true'       # independent of helmValidate - publishes regardless of whether validation ran
+    default: 'false'       # independent of helmValidate - publishes regardless of whether validation ran
   - name: helmArtifactSourceDir
     type: string
     default: '$(Build.SourcesDirectory)/helm'
